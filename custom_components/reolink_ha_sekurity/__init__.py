@@ -139,7 +139,8 @@ class ReolinkHaSekurityCoordinator:
 
     async def async_setup(self) -> None:
         """Initialize the integration."""
-        _LOGGER.info("Setting up Reolink HA Sekurity")
+        _LOGGER.warning("[SEKURITY] Setting up Reolink HA Sekurity")
+        _LOGGER.warning("[SEKURITY] Config cameras: %s", list(self.cameras.keys()))
 
         # 1. Create input_boolean entities for alarm toggles
         await self._create_alarm_toggles()
@@ -157,23 +158,32 @@ class ReolinkHaSekurityCoordinator:
         # 4. Build sensor → camera mapping and register listeners
         all_sensors = []
         for camera_name, cam_cfg in self.cameras.items():
+            _LOGGER.warning(
+                "[SEKURITY] Camera '%s': entity=%s, sensors=%s",
+                camera_name,
+                cam_cfg.get(CONF_CAMERA_ENTITY),
+                cam_cfg.get(CONF_TRIGGER_SENSORS, []),
+            )
             for sensor in cam_cfg.get(CONF_TRIGGER_SENSORS, []):
                 self._sensor_to_camera[sensor] = camera_name
                 all_sensors.append(sensor)
+
+        _LOGGER.warning("[SEKURITY] Listening to sensors: %s", all_sensors)
 
         if all_sensors:
             unsub = async_track_state_change_event(
                 self.hass, all_sensors, self._on_sensor_change
             )
             self._unsub_listeners.append(unsub)
-
+        else:
+            _LOGGER.warning("[SEKURITY] WARNING: No sensors to monitor!")
 
         # 5. Register API views
         self.hass.http.register_view(EventsAPIView(self))
         self.hass.http.register_view(EventDetailAPIView(self))
 
-        _LOGGER.info(
-            "Reolink HA Sekurity ready — monitoring %d cameras, %d sensors",
+        _LOGGER.warning(
+            "[SEKURITY] Ready — monitoring %d cameras, %d sensors",
             len(self.cameras),
             len(all_sensors),
         )
@@ -212,11 +222,19 @@ class ReolinkHaSekurityCoordinator:
         new_state = event.data.get("new_state")
         old_state = event.data.get("old_state")
 
+        _LOGGER.warning(
+            "[SEKURITY] Sensor change: %s -> %s (was: %s)",
+            entity_id,
+            new_state.state if new_state else None,
+            old_state.state if old_state else None,
+        )
+
         if new_state is None:
             return
 
         camera_name = self._sensor_to_camera.get(entity_id)
         if camera_name is None:
+            _LOGGER.warning("[SEKURITY] Sensor %s not mapped to any camera", entity_id)
             return
 
         cam_cfg = self.cameras.get(camera_name)
@@ -226,6 +244,7 @@ class ReolinkHaSekurityCoordinator:
         state_value = new_state.state
 
         if state_value in ("on", "detected"):
+            _LOGGER.warning("[SEKURITY] DETECTION: %s on %s", entity_id, camera_name)
             await self._handle_sensor_on(entity_id, camera_name, cam_cfg)
         elif state_value in ("off", "clear") and old_state and old_state.state in ("on", "detected"):
             await self._handle_sensor_off(entity_id, camera_name)
