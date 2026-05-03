@@ -211,15 +211,15 @@ class EventRecorder:
                 self._segment_index,
                 self.clip_duration,
             )
-            save_event_metadata(
-                self.media_path,
-                self.camera_name,
-                self.event_id,
-                self.event_data,
+            await self.hass.async_add_executor_job(
+                save_event_metadata,
+                self.media_path, self.camera_name,
+                self.event_id, self.event_data,
             )
             # Update the events index so the card can see new segments
-            append_to_events_index(
-                self.media_path, self.camera_name, self.event_data
+            await self.hass.async_add_executor_job(
+                append_to_events_index,
+                self.media_path, self.camera_name, self.event_data,
             )
 
             _LOGGER.debug("Segment %d saved: %s", self._segment_index, segment_path)
@@ -237,24 +237,25 @@ class EventRecorder:
         """Main recording loop — records segments until the event ends."""
         try:
             # Create event directory
-            self.event_dir = ensure_event_dir(
-                self.media_path, self.camera_name, self.event_id
+            self.event_dir = await self.hass.async_add_executor_job(
+                ensure_event_dir,
+                self.media_path, self.camera_name, self.event_id,
             )
 
             # Save initial metadata
-            save_event_metadata(
-                self.media_path,
-                self.camera_name,
-                self.event_id,
-                self.event_data,
+            await self.hass.async_add_executor_job(
+                save_event_metadata,
+                self.media_path, self.camera_name,
+                self.event_id, self.event_data,
             )
 
             # Take snapshot for thumbnail
             await self.take_snapshot()
 
             # Initial index entry (in_progress)
-            append_to_events_index(
-                self.media_path, self.camera_name, self.event_data
+            await self.hass.async_add_executor_job(
+                append_to_events_index,
+                self.media_path, self.camera_name, self.event_data,
             )
 
             # Segment loop
@@ -282,14 +283,14 @@ class EventRecorder:
             if self.event_data["status"] != "error":
                 complete_event_metadata(self.event_data)
 
-            save_event_metadata(
-                self.media_path,
-                self.camera_name,
-                self.event_id,
-                self.event_data,
+            await self.hass.async_add_executor_job(
+                save_event_metadata,
+                self.media_path, self.camera_name,
+                self.event_id, self.event_data,
             )
-            append_to_events_index(
-                self.media_path, self.camera_name, self.event_data
+            await self.hass.async_add_executor_job(
+                append_to_events_index,
+                self.media_path, self.camera_name, self.event_data,
             )
 
             _LOGGER.info(
@@ -302,22 +303,20 @@ class EventRecorder:
             _LOGGER.warning("Recording cancelled for event %s", self.event_id)
             if self.event_data["status"] == "in_progress":
                 complete_event_metadata(self.event_data)
-                save_event_metadata(
-                    self.media_path,
-                    self.camera_name,
-                    self.event_id,
-                    self.event_data,
+                await self.hass.async_add_executor_job(
+                    save_event_metadata,
+                    self.media_path, self.camera_name,
+                    self.event_id, self.event_data,
                 )
             raise
 
         except Exception:
             _LOGGER.exception("Unexpected error in recorder for %s", self.event_id)
             fail_event_metadata(self.event_data, "Unexpected error")
-            save_event_metadata(
-                self.media_path,
-                self.camera_name,
-                self.event_id,
-                self.event_data,
+            await self.hass.async_add_executor_job(
+                save_event_metadata,
+                self.media_path, self.camera_name,
+                self.event_id, self.event_data,
             )
 
     def stop(self) -> None:
