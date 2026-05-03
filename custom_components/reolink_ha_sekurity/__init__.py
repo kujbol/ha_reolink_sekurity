@@ -63,7 +63,24 @@ FRONTEND_SCRIPT_URL = "/reolink_ha_sekurity/reolink-ha-sekurity-card.js"
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
-    """Set up Reolink HA Sekurity from yaml (not used — config flow only)."""
+    """Set up Reolink HA Sekurity — register frontend on load."""
+    from homeassistant.components.http import StaticPathConfig
+
+    # Register frontend card immediately on integration load (before config entries)
+    # This makes the card available right after HACS install + restart
+    frontend_path = Path(__file__).parent / "frontend"
+    await hass.http.async_register_static_paths(
+        [
+            StaticPathConfig(
+                url_path="/reolink_ha_sekurity",
+                path=str(frontend_path),
+                cache_headers=False,
+            )
+        ]
+    )
+    hass.data.setdefault("frontend_extra_module_url", set())
+    hass.data["frontend_extra_module_url"].add(FRONTEND_SCRIPT_URL)
+
     return True
 
 
@@ -150,10 +167,8 @@ class ReolinkHaSekurityCoordinator:
             )
             self._unsub_listeners.append(unsub)
 
-        # 5. Register frontend card
-        await self._register_frontend()
 
-        # 6. Register API views
+        # 5. Register API views
         self.hass.http.register_view(EventsAPIView(self))
         self.hass.http.register_view(EventDetailAPIView(self))
 
@@ -190,26 +205,6 @@ class ReolinkHaSekurityCoordinator:
         """Create camera directories on the NAS."""
         for camera_name in self.cameras:
             ensure_camera_dirs(self.media_path, camera_name)
-
-    async def _register_frontend(self) -> None:
-        """Register the Lovelace card as a frontend resource."""
-        from homeassistant.components.http import StaticPathConfig
-
-        # Serve the JS file from the integration's frontend directory
-        frontend_path = Path(__file__).parent / "frontend"
-        await self.hass.http.async_register_static_paths(
-            [
-                StaticPathConfig(
-                    url_path="/reolink_ha_sekurity",
-                    path=str(frontend_path),
-                    cache_headers=False,
-                )
-            ]
-        )
-
-        # Add the card JS as a frontend extra module URL
-        self.hass.data.setdefault("frontend_extra_module_url", set())
-        self.hass.data["frontend_extra_module_url"].add(FRONTEND_SCRIPT_URL)
 
     async def _on_sensor_change(self, event: Event) -> None:
         """Handle binary sensor state changes."""
