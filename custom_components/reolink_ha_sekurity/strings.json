@@ -20,10 +20,16 @@
       },
       "camera": {
         "title": "Add Camera",
-        "description": "Configure a camera for event recording.",
+        "description": "Select a camera entity to configure.",
         "data": {
           "camera_entity": "Camera entity",
-          "camera_name": "Camera name (auto-derived if empty)",
+          "camera_name": "Camera name (auto-derived if empty)"
+        }
+      },
+      "camera_sensors": {
+        "title": "Configure Sensors — {camera_name}",
+        "description": "Found {sensor_count} detection sensors. Select which ones to monitor.",
+        "data": {
           "trigger_sensors": "Detection sensors to monitor",
           "clip_duration": "Segment duration",
           "lookback": "Pre-roll (lookback)",
@@ -32,7 +38,7 @@
           "add_another": "Add another camera"
         },
         "data_description": {
-          "trigger_sensors": "Select person, vehicle, or other detection sensors",
+          "trigger_sensors": "Person and vehicle are pre-selected. Add or remove as needed.",
           "alarm_participation": "When off, this camera records but never triggers notifications or lights"
         }
       }

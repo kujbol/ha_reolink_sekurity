@@ -151,7 +151,7 @@ class ReolinkHaSekurityCoordinator:
             self._unsub_listeners.append(unsub)
 
         # 5. Register frontend card
-        self._register_frontend()
+        await self._register_frontend()
 
         # 6. Register API views
         self.hass.http.register_view(EventsAPIView(self))
@@ -191,20 +191,21 @@ class ReolinkHaSekurityCoordinator:
         for camera_name in self.cameras:
             ensure_camera_dirs(self.media_path, camera_name)
 
-    def _register_frontend(self) -> None:
+    async def _register_frontend(self) -> None:
         """Register the Lovelace card as a frontend resource."""
+        from homeassistant.components.http import StaticPathConfig
+
         # Serve the JS file from the integration's frontend directory
         frontend_path = Path(__file__).parent / "frontend"
-        self.hass.http.register_static_path(
-            "/reolink_ha_sekurity",
-            str(frontend_path),
-            cache_headers=False,
+        await self.hass.http.async_register_static_paths(
+            [
+                StaticPathConfig(
+                    url_path="/reolink_ha_sekurity",
+                    path=str(frontend_path),
+                    cache_headers=False,
+                )
+            ]
         )
-
-        # Register as a Lovelace resource
-        self.hass.components.frontend.async_register_built_in_panel(
-            "lovelace",  # not a panel — we just need the resource
-        ) if False else None  # noqa: intentional no-op
 
         # Add the card JS as a frontend extra module URL
         self.hass.data.setdefault("frontend_extra_module_url", set())

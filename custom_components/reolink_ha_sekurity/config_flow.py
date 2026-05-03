@@ -195,24 +195,51 @@ class ReolinkHaSekurityConfigFlow(
     async def async_step_camera(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.ConfigFlowResult:
-        """Step 2+: Add a camera."""
+        """Step 2a: Pick a camera entity."""
+        if user_input is not None:
+            self._current_camera_entity = user_input[CONF_CAMERA_ENTITY]
+            self._current_camera_name = user_input.get(
+                CONF_CAMERA_NAME, _derive_camera_name(self._current_camera_entity)
+            )
+            self._current_camera_name = re.sub(
+                r"[^a-zA-Z0-9_]", "_", self._current_camera_name
+            ).lower()
+
+            # Auto-discover sensors on this camera's device
+            self._available_sensors = _find_device_sensors(
+                self.hass, self._current_camera_entity
+            )
+            return await self.async_step_camera_sensors()
+
+        return self.async_show_form(
+            step_id="camera",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_CAMERA_ENTITY): EntitySelector(
+                        EntitySelectorConfig(domain="camera")
+                    ),
+                    vol.Optional(CONF_CAMERA_NAME): TextSelector(
+                        TextSelectorConfig(type="text")
+                    ),
+                }
+            ),
+        )
+
+    async def async_step_camera_sensors(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        """Step 2b: Select sensors and recording settings for the camera."""
         errors = {}
 
         if user_input is not None:
-            camera_entity = user_input[CONF_CAMERA_ENTITY]
-            camera_name = user_input.get(
-                CONF_CAMERA_NAME, _derive_camera_name(camera_entity)
-            )
-            # Sanitize camera name for filesystem use
-            camera_name = re.sub(r"[^a-zA-Z0-9_]", "_", camera_name).lower()
-
             trigger_sensors = user_input.get(CONF_TRIGGER_SENSORS, [])
 
             if not trigger_sensors:
                 errors["base"] = "no_sensors"
             else:
+                camera_name = self._current_camera_name
                 self._cameras[camera_name] = {
-                    CONF_CAMERA_ENTITY: camera_entity,
+                    CONF_CAMERA_ENTITY: self._current_camera_entity,
                     CONF_CAMERA_NAME: camera_name,
                     CONF_TRIGGER_SENSORS: trigger_sensors,
                     CONF_CLIP_DURATION: user_input.get(
@@ -238,21 +265,38 @@ class ReolinkHaSekurityConfigFlow(
                     },
                 )
 
+        # Pre-select person and vehicle sensors from discovered sensors
+        default_sensors = [
+            s["entity_id"]
+            for s in self._available_sensors
+            if s["type"] in ("person", "vehicle")
+        ]
+
+        # If we found sensors on the device, show only those
+        if self._available_sensors:
+            sensor_entity_ids = [s["entity_id"] for s in self._available_sensors]
+            sensor_schema = vol.Required(
+                CONF_TRIGGER_SENSORS, default=default_sensors
+            )
+            sensor_selector = EntitySelector(
+                EntitySelectorConfig(
+                    domain="binary_sensor",
+                    multiple=True,
+                    include_entities=sensor_entity_ids,
+                )
+            )
+        else:
+            # Fallback — no auto-discovery, show all binary sensors
+            sensor_schema = vol.Required(CONF_TRIGGER_SENSORS, default=[])
+            sensor_selector = EntitySelector(
+                EntitySelectorConfig(domain="binary_sensor", multiple=True)
+            )
+
         return self.async_show_form(
-            step_id="camera",
+            step_id="camera_sensors",
             data_schema=vol.Schema(
                 {
-                    vol.Required(CONF_CAMERA_ENTITY): EntitySelector(
-                        EntitySelectorConfig(domain="camera")
-                    ),
-                    vol.Optional(CONF_CAMERA_NAME): TextSelector(
-                        TextSelectorConfig(type="text")
-                    ),
-                    vol.Required(CONF_TRIGGER_SENSORS, default=[]): EntitySelector(
-                        EntitySelectorConfig(
-                            domain="binary_sensor", multiple=True
-                        )
-                    ),
+                    sensor_schema: sensor_selector,
                     vol.Required(
                         CONF_CLIP_DURATION, default=DEFAULT_CLIP_DURATION
                     ): NumberSelector(
@@ -281,6 +325,10 @@ class ReolinkHaSekurityConfigFlow(
                 }
             ),
             errors=errors,
+            description_placeholders={
+                "camera_name": self._current_camera_name,
+                "sensor_count": str(len(self._available_sensors)),
+            },
         )
 
     @staticmethod
