@@ -181,6 +181,7 @@ class ReolinkHaSekurityCoordinator:
         # 5. Register API views
         self.hass.http.register_view(EventsAPIView(self))
         self.hass.http.register_view(EventDetailAPIView(self))
+        self.hass.http.register_view(MediaFileView(self))
 
         _LOGGER.warning(
             "[SEKURITY] Ready — monitoring %d cameras, %d sensors",
@@ -474,8 +475,8 @@ class EventDetailAPIView(HomeAssistantView):
         if metadata is None:
             return web.json_response({"error": "Event not found"}, status=404)
 
-        # Build media URLs for segments and snapshot
-        base_media_url = f"/media/local/{self._coordinator.media_path}/{camera_name}/{event_id}"
+        # Build media URLs through our authenticated API endpoint
+        base_media_url = f"/api/reolink_ha_sekurity/media/{camera_name}/{event_id}"
 
         segments_with_urls = []
         for seg in metadata.get("segments", []):
@@ -502,4 +503,41 @@ class EventDetailAPIView(HomeAssistantView):
                 "is_active": is_active,
                 "camera_entity": camera_entity,
             }
+        )
+
+
+class MediaFileView(HomeAssistantView):
+    """Serve media files (segments, snapshots) with HA authentication."""
+
+    url = "/api/reolink_ha_sekurity/media/{camera_name}/{event_id}/{filename}"
+    name = "api:reolink_ha_sekurity:media"
+    requires_auth = True
+
+    def __init__(self, coordinator: ReolinkHaSekurityCoordinator):
+        self._coordinator = coordinator
+
+    async def get(self, request, camera_name: str, event_id: str, filename: str):
+        """Serve a media file."""
+        from aiohttp import web
+        import mimetypes
+
+        # Sanitize inputs to prevent path traversal
+        for part in (camera_name, event_id, filename):
+            if ".." in part or "/" in part or "\\" in part:
+                return web.Response(status=400, text="Invalid path")
+
+        media_base = get_media_base_path(self._coordinator.media_path)
+        file_path = media_base / camera_name / event_id / filename
+
+        if not file_path.exists():
+            return web.Response(status=404, text="File not found")
+
+        # Determine content type
+        content_type, _ = mimetypes.guess_type(str(file_path))
+        if content_type is None:
+            content_type = "application/octet-stream"
+
+        return web.FileResponse(
+            file_path,
+            headers={"Content-Type": content_type},
         )
