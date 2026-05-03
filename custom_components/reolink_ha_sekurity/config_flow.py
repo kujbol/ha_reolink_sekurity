@@ -1,0 +1,508 @@
+"""Config flow for Reolink HA Sekurity."""
+
+from __future__ import annotations
+
+import logging
+import re
+from typing import Any
+
+import voluptuous as vol
+from homeassistant import config_entries
+from homeassistant.core import callback
+from homeassistant.helpers import entity_registry as er, device_registry as dr
+from homeassistant.helpers.selector import (
+    EntitySelector,
+    EntitySelectorConfig,
+    TextSelector,
+    TextSelectorConfig,
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
+    BooleanSelector,
+    TimeSelector,
+)
+
+from .const import (
+    CONF_ALARM_PARTICIPATION,
+    CONF_CAMERA_ENTITY,
+    CONF_CAMERA_NAME,
+    CONF_CAMERAS,
+    CONF_CLIP_DURATION,
+    CONF_DASHBOARD_PATH,
+    CONF_LIGHT_ENTITIES,
+    CONF_LIGHT_TIMEOUT,
+    CONF_LOOKBACK,
+    CONF_MEDIA_PATH,
+    CONF_NIGHT_END,
+    CONF_NIGHT_START,
+    CONF_NOTIFY_TARGETS,
+    CONF_POST_ROLL,
+    CONF_TRIGGER_SENSORS,
+    DEFAULT_CLIP_DURATION,
+    DEFAULT_LIGHT_TIMEOUT,
+    DEFAULT_LOOKBACK,
+    DEFAULT_MEDIA_PATH,
+    DEFAULT_NIGHT_END,
+    DEFAULT_NIGHT_START,
+    DEFAULT_POST_ROLL,
+    DOMAIN,
+)
+
+_LOGGER = logging.getLogger(__name__)
+
+
+def _derive_camera_name(entity_id: str) -> str:
+    """Derive a friendly name from a camera entity ID.
+
+    camera.front_door_fluent -> front_door
+    camera.front_door_clear -> front_door
+    camera.front_door -> front_door
+    """
+    name = entity_id.replace("camera.", "")
+    # Strip common Reolink stream suffixes
+    for suffix in ("_fluent", "_clear", "_balanced", "_snapshots_fluent", "_snapshots_clear"):
+        if name.endswith(suffix):
+            name = name[: -len(suffix)]
+            break
+    return name
+
+
+def _find_device_sensors(
+    hass, camera_entity_id: str
+) -> list[dict[str, str]]:
+    """Find all binary sensors on the same device as the camera.
+
+    Auto-discovers person, vehicle, motion, pet, animal, visitor sensors.
+    """
+    ent_reg = er.async_get(hass)
+    dev_reg = dr.async_get(hass)
+
+    camera_entry = ent_reg.async_get(camera_entity_id)
+    if camera_entry is None or camera_entry.device_id is None:
+        return []
+
+    device_id = camera_entry.device_id
+    sensors = []
+
+    detection_types = {
+        "person": "Person",
+        "vehicle": "Vehicle",
+        "motion": "Motion",
+        "pet": "Pet",
+        "animal": "Animal",
+        "visitor": "Visitor (Doorbell)",
+    }
+
+    for entity in er.async_entries_for_device(ent_reg, device_id):
+        if entity.domain != "binary_sensor":
+            continue
+        for det_type, label in detection_types.items():
+            if f"_{det_type}" in entity.entity_id:
+                sensors.append(
+                    {
+                        "entity_id": entity.entity_id,
+                        "type": det_type,
+                        "label": label,
+                    }
+                )
+                break
+
+    return sensors
+
+
+class ReolinkHaSekurityConfigFlow(
+    config_entries.ConfigFlow, domain=DOMAIN
+):
+    """Handle a config flow for Reolink HA Sekurity."""
+
+    VERSION = 1
+
+    def __init__(self):
+        """Initialize the config flow."""
+        self._global_data: dict[str, Any] = {}
+        self._cameras: dict[str, dict] = {}
+        self._available_sensors: list[dict] = []
+
+    async def async_step_user(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        """Step 1: Global settings."""
+        errors = {}
+
+        if user_input is not None:
+            self._global_data = {
+                CONF_MEDIA_PATH: user_input.get(CONF_MEDIA_PATH, DEFAULT_MEDIA_PATH),
+                CONF_NOTIFY_TARGETS: [
+                    t.strip()
+                    for t in user_input.get(CONF_NOTIFY_TARGETS, "").split(",")
+                    if t.strip()
+                ],
+                CONF_NIGHT_START: user_input.get(CONF_NIGHT_START, DEFAULT_NIGHT_START),
+                CONF_NIGHT_END: user_input.get(CONF_NIGHT_END, DEFAULT_NIGHT_END),
+                CONF_LIGHT_ENTITIES: user_input.get(CONF_LIGHT_ENTITIES, []),
+                CONF_LIGHT_TIMEOUT: user_input.get(
+                    CONF_LIGHT_TIMEOUT, DEFAULT_LIGHT_TIMEOUT
+                ),
+                CONF_DASHBOARD_PATH: user_input.get(
+                    CONF_DASHBOARD_PATH, "/lovelace/security"
+                ),
+            }
+            return await self.async_step_camera()
+
+        return self.async_show_form(
+            step_id="user",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_MEDIA_PATH, default=DEFAULT_MEDIA_PATH
+                    ): TextSelector(TextSelectorConfig(type="text")),
+                    vol.Required(
+                        CONF_NOTIFY_TARGETS,
+                        default="notify.mobile_app_",
+                    ): TextSelector(
+                        TextSelectorConfig(
+                            type="text",
+                            multiline=False,
+                        )
+                    ),
+                    vol.Required(
+                        CONF_NIGHT_START, default=DEFAULT_NIGHT_START
+                    ): TimeSelector(),
+                    vol.Required(
+                        CONF_NIGHT_END, default=DEFAULT_NIGHT_END
+                    ): TimeSelector(),
+                    vol.Optional(CONF_LIGHT_ENTITIES, default=[]): EntitySelector(
+                        EntitySelectorConfig(domain="light", multiple=True)
+                    ),
+                    vol.Required(
+                        CONF_LIGHT_TIMEOUT, default=DEFAULT_LIGHT_TIMEOUT
+                    ): NumberSelector(
+                        NumberSelectorConfig(
+                            min=60, max=1800, step=60, mode=NumberSelectorMode.BOX, unit_of_measurement="seconds"
+                        )
+                    ),
+                    vol.Required(
+                        CONF_DASHBOARD_PATH, default="/lovelace/security"
+                    ): TextSelector(TextSelectorConfig(type="text")),
+                }
+            ),
+            errors=errors,
+            description_placeholders={
+                "notify_hint": "Comma-separated, e.g. notify.mobile_app_phone1,notify.mobile_app_phone2"
+            },
+        )
+
+    async def async_step_camera(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        """Step 2+: Add a camera."""
+        errors = {}
+
+        if user_input is not None:
+            camera_entity = user_input[CONF_CAMERA_ENTITY]
+            camera_name = user_input.get(
+                CONF_CAMERA_NAME, _derive_camera_name(camera_entity)
+            )
+            # Sanitize camera name for filesystem use
+            camera_name = re.sub(r"[^a-zA-Z0-9_]", "_", camera_name).lower()
+
+            trigger_sensors = user_input.get(CONF_TRIGGER_SENSORS, [])
+
+            if not trigger_sensors:
+                errors["base"] = "no_sensors"
+            else:
+                self._cameras[camera_name] = {
+                    CONF_CAMERA_ENTITY: camera_entity,
+                    CONF_CAMERA_NAME: camera_name,
+                    CONF_TRIGGER_SENSORS: trigger_sensors,
+                    CONF_CLIP_DURATION: user_input.get(
+                        CONF_CLIP_DURATION, DEFAULT_CLIP_DURATION
+                    ),
+                    CONF_LOOKBACK: user_input.get(CONF_LOOKBACK, DEFAULT_LOOKBACK),
+                    CONF_POST_ROLL: user_input.get(CONF_POST_ROLL, DEFAULT_POST_ROLL),
+                    CONF_ALARM_PARTICIPATION: user_input.get(
+                        CONF_ALARM_PARTICIPATION, True
+                    ),
+                }
+
+                # Check if user wants to add more cameras
+                if user_input.get("add_another", False):
+                    return await self.async_step_camera()
+
+                # Done — create the entry
+                return self.async_create_entry(
+                    title="Reolink HA Sekurity",
+                    data={
+                        **self._global_data,
+                        CONF_CAMERAS: self._cameras,
+                    },
+                )
+
+        return self.async_show_form(
+            step_id="camera",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_CAMERA_ENTITY): EntitySelector(
+                        EntitySelectorConfig(domain="camera")
+                    ),
+                    vol.Optional(CONF_CAMERA_NAME): TextSelector(
+                        TextSelectorConfig(type="text")
+                    ),
+                    vol.Required(CONF_TRIGGER_SENSORS, default=[]): EntitySelector(
+                        EntitySelectorConfig(
+                            domain="binary_sensor", multiple=True
+                        )
+                    ),
+                    vol.Required(
+                        CONF_CLIP_DURATION, default=DEFAULT_CLIP_DURATION
+                    ): NumberSelector(
+                        NumberSelectorConfig(
+                            min=10, max=120, step=5, mode=NumberSelectorMode.SLIDER, unit_of_measurement="seconds"
+                        )
+                    ),
+                    vol.Required(
+                        CONF_LOOKBACK, default=DEFAULT_LOOKBACK
+                    ): NumberSelector(
+                        NumberSelectorConfig(
+                            min=0, max=10, step=1, mode=NumberSelectorMode.SLIDER, unit_of_measurement="seconds"
+                        )
+                    ),
+                    vol.Required(
+                        CONF_POST_ROLL, default=DEFAULT_POST_ROLL
+                    ): NumberSelector(
+                        NumberSelectorConfig(
+                            min=0, max=60, step=5, mode=NumberSelectorMode.SLIDER, unit_of_measurement="seconds"
+                        )
+                    ),
+                    vol.Required(
+                        CONF_ALARM_PARTICIPATION, default=True
+                    ): BooleanSelector(),
+                    vol.Optional("add_another", default=False): BooleanSelector(),
+                }
+            ),
+            errors=errors,
+        )
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(
+        config_entry: config_entries.ConfigEntry,
+    ) -> ReolinkHaSekurityOptionsFlow:
+        """Get the options flow handler."""
+        return ReolinkHaSekurityOptionsFlow(config_entry)
+
+
+class ReolinkHaSekurityOptionsFlow(config_entries.OptionsFlow):
+    """Handle options flow for Reolink HA Sekurity."""
+
+    def __init__(self, config_entry: config_entries.ConfigEntry):
+        """Initialize options flow."""
+        self._config_entry = config_entry
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        """Main options menu."""
+        return self.async_show_menu(
+            step_id="init",
+            menu_options=["global_settings", "add_camera", "remove_camera"],
+        )
+
+    async def async_step_global_settings(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        """Edit global settings."""
+        current = self._config_entry.data
+
+        if user_input is not None:
+            new_data = {**current}
+            new_data[CONF_MEDIA_PATH] = user_input.get(
+                CONF_MEDIA_PATH, current.get(CONF_MEDIA_PATH, DEFAULT_MEDIA_PATH)
+            )
+            new_data[CONF_NOTIFY_TARGETS] = [
+                t.strip()
+                for t in user_input.get(CONF_NOTIFY_TARGETS, "").split(",")
+                if t.strip()
+            ]
+            new_data[CONF_NIGHT_START] = user_input.get(
+                CONF_NIGHT_START, current.get(CONF_NIGHT_START, DEFAULT_NIGHT_START)
+            )
+            new_data[CONF_NIGHT_END] = user_input.get(
+                CONF_NIGHT_END, current.get(CONF_NIGHT_END, DEFAULT_NIGHT_END)
+            )
+            new_data[CONF_LIGHT_ENTITIES] = user_input.get(
+                CONF_LIGHT_ENTITIES, current.get(CONF_LIGHT_ENTITIES, [])
+            )
+            new_data[CONF_LIGHT_TIMEOUT] = user_input.get(
+                CONF_LIGHT_TIMEOUT, current.get(CONF_LIGHT_TIMEOUT, DEFAULT_LIGHT_TIMEOUT)
+            )
+            new_data[CONF_DASHBOARD_PATH] = user_input.get(
+                CONF_DASHBOARD_PATH,
+                current.get(CONF_DASHBOARD_PATH, "/lovelace/security"),
+            )
+            self.hass.config_entries.async_update_entry(
+                self._config_entry, data=new_data
+            )
+            return self.async_create_entry(title="", data={})
+
+        notify_str = ",".join(
+            current.get(CONF_NOTIFY_TARGETS, [])
+        )
+
+        return self.async_show_form(
+            step_id="global_settings",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_MEDIA_PATH,
+                        default=current.get(CONF_MEDIA_PATH, DEFAULT_MEDIA_PATH),
+                    ): TextSelector(TextSelectorConfig(type="text")),
+                    vol.Required(
+                        CONF_NOTIFY_TARGETS,
+                        default=notify_str,
+                    ): TextSelector(TextSelectorConfig(type="text")),
+                    vol.Required(
+                        CONF_NIGHT_START,
+                        default=current.get(CONF_NIGHT_START, DEFAULT_NIGHT_START),
+                    ): TimeSelector(),
+                    vol.Required(
+                        CONF_NIGHT_END,
+                        default=current.get(CONF_NIGHT_END, DEFAULT_NIGHT_END),
+                    ): TimeSelector(),
+                    vol.Optional(
+                        CONF_LIGHT_ENTITIES,
+                        default=current.get(CONF_LIGHT_ENTITIES, []),
+                    ): EntitySelector(
+                        EntitySelectorConfig(domain="light", multiple=True)
+                    ),
+                    vol.Required(
+                        CONF_LIGHT_TIMEOUT,
+                        default=current.get(CONF_LIGHT_TIMEOUT, DEFAULT_LIGHT_TIMEOUT),
+                    ): NumberSelector(
+                        NumberSelectorConfig(
+                            min=60, max=1800, step=60, mode=NumberSelectorMode.BOX, unit_of_measurement="seconds"
+                        )
+                    ),
+                    vol.Required(
+                        CONF_DASHBOARD_PATH,
+                        default=current.get(CONF_DASHBOARD_PATH, "/lovelace/security"),
+                    ): TextSelector(TextSelectorConfig(type="text")),
+                }
+            ),
+        )
+
+    async def async_step_add_camera(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        """Add a new camera."""
+        errors = {}
+        current = self._config_entry.data
+
+        if user_input is not None:
+            camera_entity = user_input[CONF_CAMERA_ENTITY]
+            camera_name = user_input.get(
+                CONF_CAMERA_NAME, _derive_camera_name(camera_entity)
+            )
+            camera_name = re.sub(r"[^a-zA-Z0-9_]", "_", camera_name).lower()
+            trigger_sensors = user_input.get(CONF_TRIGGER_SENSORS, [])
+
+            if not trigger_sensors:
+                errors["base"] = "no_sensors"
+            else:
+                new_data = {**current}
+                cameras = dict(new_data.get(CONF_CAMERAS, {}))
+                cameras[camera_name] = {
+                    CONF_CAMERA_ENTITY: camera_entity,
+                    CONF_CAMERA_NAME: camera_name,
+                    CONF_TRIGGER_SENSORS: trigger_sensors,
+                    CONF_CLIP_DURATION: user_input.get(
+                        CONF_CLIP_DURATION, DEFAULT_CLIP_DURATION
+                    ),
+                    CONF_LOOKBACK: user_input.get(CONF_LOOKBACK, DEFAULT_LOOKBACK),
+                    CONF_POST_ROLL: user_input.get(CONF_POST_ROLL, DEFAULT_POST_ROLL),
+                    CONF_ALARM_PARTICIPATION: user_input.get(
+                        CONF_ALARM_PARTICIPATION, True
+                    ),
+                }
+                new_data[CONF_CAMERAS] = cameras
+                self.hass.config_entries.async_update_entry(
+                    self._config_entry, data=new_data
+                )
+                return self.async_create_entry(title="", data={})
+
+        return self.async_show_form(
+            step_id="add_camera",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_CAMERA_ENTITY): EntitySelector(
+                        EntitySelectorConfig(domain="camera")
+                    ),
+                    vol.Optional(CONF_CAMERA_NAME): TextSelector(
+                        TextSelectorConfig(type="text")
+                    ),
+                    vol.Required(CONF_TRIGGER_SENSORS, default=[]): EntitySelector(
+                        EntitySelectorConfig(
+                            domain="binary_sensor", multiple=True
+                        )
+                    ),
+                    vol.Required(
+                        CONF_CLIP_DURATION, default=DEFAULT_CLIP_DURATION
+                    ): NumberSelector(
+                        NumberSelectorConfig(
+                            min=10, max=120, step=5, mode=NumberSelectorMode.SLIDER, unit_of_measurement="seconds"
+                        )
+                    ),
+                    vol.Required(
+                        CONF_LOOKBACK, default=DEFAULT_LOOKBACK
+                    ): NumberSelector(
+                        NumberSelectorConfig(
+                            min=0, max=10, step=1, mode=NumberSelectorMode.SLIDER, unit_of_measurement="seconds"
+                        )
+                    ),
+                    vol.Required(
+                        CONF_POST_ROLL, default=DEFAULT_POST_ROLL
+                    ): NumberSelector(
+                        NumberSelectorConfig(
+                            min=0, max=60, step=5, mode=NumberSelectorMode.SLIDER, unit_of_measurement="seconds"
+                        )
+                    ),
+                    vol.Required(
+                        CONF_ALARM_PARTICIPATION, default=True
+                    ): BooleanSelector(),
+                }
+            ),
+            errors=errors,
+        )
+
+    async def async_step_remove_camera(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        """Remove a camera."""
+        current = self._config_entry.data
+        cameras = current.get(CONF_CAMERAS, {})
+
+        if not cameras:
+            return self.async_abort(reason="no_cameras")
+
+        if user_input is not None:
+            camera_to_remove = user_input.get("camera_name")
+            if camera_to_remove and camera_to_remove in cameras:
+                new_data = {**current}
+                new_cameras = dict(cameras)
+                del new_cameras[camera_to_remove]
+                new_data[CONF_CAMERAS] = new_cameras
+                self.hass.config_entries.async_update_entry(
+                    self._config_entry, data=new_data
+                )
+            return self.async_create_entry(title="", data={})
+
+        camera_names = {name: name for name in cameras}
+
+        return self.async_show_form(
+            step_id="remove_camera",
+            data_schema=vol.Schema(
+                {
+                    vol.Required("camera_name"): vol.In(camera_names),
+                }
+            ),
+        )

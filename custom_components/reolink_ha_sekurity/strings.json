@@ -1,0 +1,92 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Reolink HA Sekurity — Global Settings",
+        "description": "Configure global settings for your security system.",
+        "data": {
+          "media_path": "Media storage path (relative to /media/)",
+          "notify_targets": "Notification targets (comma-separated)",
+          "night_start": "Night alarm start time",
+          "night_end": "Night alarm end time",
+          "light_entities": "Outside light entities",
+          "light_timeout": "Light auto-off timeout",
+          "dashboard_path": "Dashboard deep-link path"
+        },
+        "data_description": {
+          "notify_targets": "e.g. notify.mobile_app_phone1,notify.mobile_app_phone2",
+          "media_path": "Clips and metadata will be saved here"
+        }
+      },
+      "camera": {
+        "title": "Add Camera",
+        "description": "Configure a camera for event recording.",
+        "data": {
+          "camera_entity": "Camera entity",
+          "camera_name": "Camera name (auto-derived if empty)",
+          "trigger_sensors": "Detection sensors to monitor",
+          "clip_duration": "Segment duration",
+          "lookback": "Pre-roll (lookback)",
+          "post_roll": "Post-roll after detection ends",
+          "alarm_participation": "Participate in alarm notifications",
+          "add_another": "Add another camera"
+        },
+        "data_description": {
+          "trigger_sensors": "Select person, vehicle, or other detection sensors",
+          "alarm_participation": "When off, this camera records but never triggers notifications or lights"
+        }
+      }
+    },
+    "error": {
+      "no_sensors": "Please select at least one detection sensor"
+    },
+    "abort": {
+      "already_configured": "Already configured"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Reolink HA Sekurity — Settings",
+        "menu_options": {
+          "global_settings": "Edit global settings",
+          "add_camera": "Add a camera",
+          "remove_camera": "Remove a camera"
+        }
+      },
+      "global_settings": {
+        "title": "Global Settings",
+        "data": {
+          "media_path": "Media storage path (relative to /media/)",
+          "notify_targets": "Notification targets (comma-separated)",
+          "night_start": "Night alarm start time",
+          "night_end": "Night alarm end time",
+          "light_entities": "Outside light entities",
+          "light_timeout": "Light auto-off timeout",
+          "dashboard_path": "Dashboard deep-link path"
+        }
+      },
+      "add_camera": {
+        "title": "Add Camera",
+        "data": {
+          "camera_entity": "Camera entity",
+          "camera_name": "Camera name (auto-derived if empty)",
+          "trigger_sensors": "Detection sensors to monitor",
+          "clip_duration": "Segment duration",
+          "lookback": "Pre-roll (lookback)",
+          "post_roll": "Post-roll after detection ends",
+          "alarm_participation": "Participate in alarm notifications"
+        }
+      },
+      "remove_camera": {
+        "title": "Remove Camera",
+        "data": {
+          "camera_name": "Camera to remove"
+        }
+      }
+    },
+    "abort": {
+      "no_cameras": "No cameras configured"
+    }
+  }
+}

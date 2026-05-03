@@ -1,0 +1,6 @@
+{
+  "name": "Reolink HA Sekurity",
+  "description": "Lightweight NVR for Reolink cameras — event clips with metadata, dashboard, and notifications",
+  "homeassistant": "2024.1.0",
+  "render_readme": true
+}

@@ -1,0 +1,11 @@
+{
+  "domain": "reolink_ha_sekurity",
+  "name": "Reolink HA Sekurity",
+  "version": "0.1.0",
+  "documentation": "https://github.com/jakubkmiotek/reolink_ha_sekurity",
+  "issue_tracker": "https://github.com/jakubkmiotek/reolink_ha_sekurity/issues",
+  "codeowners": ["@jakubkmiotek"],
+  "dependencies": ["camera", "stream", "media_source"],
+  "config_flow": true,
+  "iot_class": "local_push"
+}
