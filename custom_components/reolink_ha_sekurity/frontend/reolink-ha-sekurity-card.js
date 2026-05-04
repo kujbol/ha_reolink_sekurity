@@ -24,12 +24,6 @@ class ReolinkHaSekurityCard extends HTMLElement {
     this._offset = 0;
   }
 
-  _authUrl(path) {
-    // Append auth token to API URLs for <img>/<video> elements
-    const sep = path.includes("?") ? "&" : "?";
-    return `${path}${sep}token=${this._hass.auth.data.access_token}`;
-  }
-
   set hass(hass) {
     this._hass = hass;
     if (!this._initialized) {
@@ -405,9 +399,9 @@ class ReolinkHaSekurityCard extends HTMLElement {
           (a) => a.event_id === ev.event_id
         );
         const isExpanded = this._expandedEventId === ev.event_id;
-        const thumbHtml = ev.snapshot
+        const thumbHtml = ev.snapshot_url
           ? `<img class="event-thumb"
-               src="${this._authUrl(`/api/reolink_ha_sekurity/media/${ev.camera}/${ev.event_id}/${ev.snapshot}`)}"
+               src="${ev.snapshot_url}"
                alt="" loading="lazy" onerror="this.style.display='none'">`
           : `<div class="event-thumb-placeholder">${eventTypeIcon(ev.event_type)}</div>`;
 
@@ -546,13 +540,13 @@ class ReolinkHaSekurityCard extends HTMLElement {
 
     // Segment player
     if (segments && segments.length > 0) {
-      const firstUrl = this._authUrl(segments[0].url);
+      const firstUrl = segments[0].url;
       html += `<video class="video-player" id="player-${eventId}" controls autoplay playsinline src="${firstUrl}"></video>`;
 
       // Segment buttons
       html += `<div class="segments-bar">`;
       segments.forEach((seg, i) => {
-        html += `<button class="seg-btn ${i === 0 ? "active" : ""}" data-seg-index="${i}" data-seg-url="${this._authUrl(seg.url)}">▶ ${i + 1}</button>`;
+        html += `<button class="seg-btn ${i === 0 ? "active" : ""}" data-seg-index="${i}" data-seg-url="${seg.url}">▶ ${i + 1}</button>`;
       });
 
       // Show writing indicator for active events
@@ -597,7 +591,7 @@ class ReolinkHaSekurityCard extends HTMLElement {
       player.addEventListener("ended", () => {
         currentSeg++;
         if (currentSeg < segments.length) {
-          player.src = this._authUrl(segments[currentSeg].url);
+          player.src = segments[currentSeg].url;
           player.play();
           container.querySelectorAll(".seg-btn").forEach((b) => b.classList.remove("active"));
           const nextBtn = container.querySelector(`[data-seg-index="${currentSeg}"]`);

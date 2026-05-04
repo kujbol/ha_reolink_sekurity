@@ -443,6 +443,19 @@ class EventsAPIView(HomeAssistantView):
                 offset,
             )
 
+        # Sign snapshot URLs for event list thumbnails
+        from homeassistant.components.http.auth import async_sign_path
+        from datetime import timedelta
+
+        for ev in events:
+            if ev.get("snapshot"):
+                raw_url = f"/api/reolink_ha_sekurity/media/{ev['camera']}/{ev['event_id']}/{ev['snapshot']}"
+                ev["snapshot_url"] = async_sign_path(
+                    self._coordinator.hass,
+                    raw_url,
+                    timedelta(hours=1),
+                )
+
         # Include active events info
         active = {
             name: {
@@ -498,21 +511,35 @@ class EventDetailAPIView(HomeAssistantView):
         if metadata is None:
             return web.json_response({"error": "Event not found"}, status=404)
 
-        # Build media URLs through our authenticated API endpoint
+        # Sign media URLs so <img>/<video> tags work without extra auth
+        from homeassistant.components.http.auth import async_sign_path
+        from datetime import timedelta
+
         base_media_url = f"/api/reolink_ha_sekurity/media/{camera_name}/{event_id}"
 
         segments_with_urls = []
         for seg in metadata.get("segments", []):
+            raw_url = f"{base_media_url}/{seg['file']}"
+            signed = async_sign_path(
+                self._coordinator.hass,
+                raw_url,
+                timedelta(hours=1),
+            )
             segments_with_urls.append(
                 {
                     **seg,
-                    "url": f"{base_media_url}/{seg['file']}",
+                    "url": signed,
                 }
             )
 
         snapshot_url = None
         if metadata.get("snapshot"):
-            snapshot_url = f"{base_media_url}/{metadata['snapshot']}"
+            raw_snap = f"{base_media_url}/{metadata['snapshot']}"
+            snapshot_url = async_sign_path(
+                self._coordinator.hass,
+                raw_snap,
+                timedelta(hours=1),
+            )
 
         # Check if this is an active event
         is_active = camera_name in self._coordinator.active_events
@@ -529,11 +556,11 @@ class EventDetailAPIView(HomeAssistantView):
         )
 
 class MediaFileView(HomeAssistantView):
-    """Serve media files (segments, snapshots) with manual token auth."""
+    """Serve media files (segments, snapshots) with HA authentication."""
 
     url = "/api/reolink_ha_sekurity/media/{camera_name}/{event_id}/{filename}"
     name = "api:reolink_ha_sekurity:media"
-    requires_auth = False  # We validate the token manually for <img>/<video> compat
+    requires_auth = True  # HA middleware validates signed URLs automatically
 
     def __init__(self, coordinator: ReolinkHaSekurityCoordinator):
         self._coordinator = coordinator
@@ -542,25 +569,6 @@ class MediaFileView(HomeAssistantView):
         """Serve a media file."""
         from aiohttp import web
         import mimetypes
-
-        # Manual auth: accept token from query param or Authorization header
-        token = request.query.get("token")
-        if not token:
-            auth_header = request.headers.get("Authorization", "")
-            if auth_header.startswith("Bearer "):
-                token = auth_header[7:]
-
-        if not token:
-            return web.Response(status=401, text="Authentication required")
-
-        # Validate access token
-        hass = self._coordinator.hass
-        try:
-            user = await hass.auth.async_validate_access_token(token)
-            if user is None:
-                return web.Response(status=401, text="Invalid token")
-        except Exception:
-            return web.Response(status=401, text="Invalid token")
 
         # Sanitize inputs to prevent path traversal
         for part in (camera_name, event_id, filename):
