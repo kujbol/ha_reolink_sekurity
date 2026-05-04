@@ -528,13 +528,12 @@ class EventDetailAPIView(HomeAssistantView):
             }
         )
 
-
 class MediaFileView(HomeAssistantView):
-    """Serve media files (segments, snapshots) with HA authentication."""
+    """Serve media files (segments, snapshots) with manual token auth."""
 
     url = "/api/reolink_ha_sekurity/media/{camera_name}/{event_id}/{filename}"
     name = "api:reolink_ha_sekurity:media"
-    requires_auth = True
+    requires_auth = False  # We validate the token manually for <img>/<video> compat
 
     def __init__(self, coordinator: ReolinkHaSekurityCoordinator):
         self._coordinator = coordinator
@@ -543,6 +542,25 @@ class MediaFileView(HomeAssistantView):
         """Serve a media file."""
         from aiohttp import web
         import mimetypes
+
+        # Manual auth: accept token from query param or Authorization header
+        token = request.query.get("token")
+        if not token:
+            auth_header = request.headers.get("Authorization", "")
+            if auth_header.startswith("Bearer "):
+                token = auth_header[7:]
+
+        if not token:
+            return web.Response(status=401, text="Authentication required")
+
+        # Validate access token
+        hass = self._coordinator.hass
+        try:
+            user = await hass.auth.async_validate_access_token(token)
+            if user is None:
+                return web.Response(status=401, text="Invalid token")
+        except Exception:
+            return web.Response(status=401, text="Invalid token")
 
         # Sanitize inputs to prevent path traversal
         for part in (camera_name, event_id, filename):
