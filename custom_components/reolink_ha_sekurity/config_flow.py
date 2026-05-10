@@ -98,16 +98,36 @@ def _find_device_sensors(
     for entity in er.async_entries_for_device(ent_reg, device_id):
         if entity.domain != "binary_sensor":
             continue
-        for det_type, label in detection_types.items():
-            if f"_{det_type}" in entity.entity_id:
-                sensors.append(
-                    {
-                        "entity_id": entity.entity_id,
-                        "type": det_type,
-                        "label": label,
-                    }
-                )
+
+        check_strings = [entity.entity_id.lower()]
+        if entity.unique_id:
+            check_strings.append(entity.unique_id.lower())
+        if entity.original_name:
+            check_strings.append(entity.original_name.lower())
+
+        found_type = None
+        found_label = None
+
+        for check_str in check_strings:
+            for det_type, label in detection_types.items():
+                if f"_{det_type}" in check_str or f" {det_type}" in check_str or f"-{det_type}" in check_str:
+                    found_type = det_type
+                    found_label = label
+                    break
+            if found_type:
                 break
+        
+        if not found_type:
+            found_type = "unknown"
+            found_label = "Unknown Sensor"
+
+        sensors.append(
+            {
+                "entity_id": entity.entity_id,
+                "type": found_type,
+                "label": found_label,
+            }
+        )
 
     return sensors
 
