@@ -17,6 +17,7 @@ class ReolinkHaSekurityCard extends HTMLElement {
     this._activeEvents = {};
     this._cameras = [];
     this._selectedCamera = "all";
+    this._selectedFilter = "security";
     this._expandedEventId = null;
     this._currentSegmentIndex = 0;
     this._refreshInterval = null;
@@ -64,6 +65,7 @@ class ReolinkHaSekurityCard extends HTMLElement {
     try {
       const params = new URLSearchParams({
         camera: this._selectedCamera,
+        filter: this._selectedFilter,
         limit: String(this._limit),
         offset: String(this._offset),
       });
@@ -103,6 +105,11 @@ class ReolinkHaSekurityCard extends HTMLElement {
     const eventId = params.get("event_id");
     if (eventId) {
       this._expandedEventId = eventId;
+      const parts = eventId.split('_');
+      if (parts.length >= 3) {
+        this._selectedCamera = parts.slice(2).join('_');
+      }
+      this._selectedFilter = "all"; // Ensure we can see the deep-linked event
       this._fetchEvents();
     }
   }
@@ -198,12 +205,22 @@ class ReolinkHaSekurityCard extends HTMLElement {
         0%, 100% { opacity: 1; }
         50% { opacity: 0.4; }
       }
+      .camera-tabs-container {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        border-bottom: 1px solid var(--border);
+        padding-right: 16px;
+      }
       .camera-tabs {
         display: flex;
         gap: 4px;
         padding: 8px 16px;
         overflow-x: auto;
-        border-bottom: 1px solid var(--border);
+      }
+      .filter-tabs {
+        display: flex;
+        gap: 4px;
       }
       .camera-tab {
         padding: 4px 12px;
@@ -385,9 +402,14 @@ class ReolinkHaSekurityCard extends HTMLElement {
     const cameraTabs = ["all", ...this._cameras]
       .map(
         (c) => `<button class="camera-tab ${this._selectedCamera === c ? "active" : ""}"
-                  data-camera="${c}">${c === "all" ? "All" : c.replace(/_/g, " ")}</button>`
+                  data-camera="${c}">${c === "all" ? "All Cameras" : c.replace(/_/g, " ")}</button>`
       )
       .join("");
+
+    const filterTabs = `
+      <button class="camera-tab ${this._selectedFilter === 'all' ? "active" : ""}" data-filter="all">All Events</button>
+      <button class="camera-tab ${this._selectedFilter === 'security' ? "active" : ""}" data-filter="security">Security Events</button>
+    `;
 
     // Build event rows
     let eventsHtml = "";
@@ -437,7 +459,10 @@ class ReolinkHaSekurityCard extends HTMLElement {
               </button>
             </div>
           </div>
-          <div class="camera-tabs">${cameraTabs}</div>
+          <div class="camera-tabs-container">
+            <div class="camera-tabs">${cameraTabs}</div>
+            <div class="filter-tabs">${filterTabs}</div>
+          </div>
           <div class="events-list">${eventsHtml}</div>
           ${this._events.length >= this._limit ? `<button class="load-more">Load more</button>` : ""}
         </div>
@@ -445,9 +470,17 @@ class ReolinkHaSekurityCard extends HTMLElement {
     `;
 
     // --- Event listeners ---
-    this.shadowRoot.querySelectorAll(".camera-tab").forEach((tab) => {
+    this.shadowRoot.querySelectorAll(".camera-tab[data-camera]").forEach((tab) => {
       tab.addEventListener("click", () => {
         this._selectedCamera = tab.dataset.camera;
+        this._offset = 0;
+        this._fetchEvents();
+      });
+    });
+
+    this.shadowRoot.querySelectorAll(".camera-tab[data-filter]").forEach((tab) => {
+      tab.addEventListener("click", () => {
+        this._selectedFilter = tab.dataset.filter;
         this._offset = 0;
         this._fetchEvents();
       });
@@ -503,6 +536,7 @@ class ReolinkHaSekurityCard extends HTMLElement {
     try {
       const params = new URLSearchParams({
         camera: this._selectedCamera,
+        filter: this._selectedFilter,
         limit: String(this._limit),
         offset: String(this._offset),
       });

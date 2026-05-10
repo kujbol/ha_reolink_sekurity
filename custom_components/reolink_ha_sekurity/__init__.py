@@ -322,10 +322,9 @@ class ReolinkHaSekurityCoordinator:
         # Evaluate alarm (non-blocking — don't delay recording start)
         alarm_sensors = cam_cfg.get(CONF_ALARM_SENSORS, cam_cfg.get(CONF_TRIGGER_SENSORS, []))
         is_alarm_sensor = entity_id in alarm_sensors
-        alarm_participation = cam_cfg.get(CONF_ALARM_PARTICIPATION, True)
 
         if is_alarm_sensor and should_notify(
-            self.hass, alarm_participation, self.night_start, self.night_end
+            self.hass, True, self.night_start, self.night_end
         ):
             recorder.event_data["alarm_active"] = True
             recorder.event_data["notification_sent"] = True
@@ -340,7 +339,7 @@ class ReolinkHaSekurityCoordinator:
             )
 
         if is_alarm_sensor and should_activate_lights(
-            self.hass, alarm_participation, self.night_start, self.night_end
+            self.hass, True, self.night_start, self.night_end
         ):
             recorder.event_data["lights_activated"] = True
             if self._light_controller:
@@ -431,22 +430,26 @@ class EventsAPIView(HomeAssistantView):
         limit = int(params.get("limit", 25))
         offset = int(params.get("offset", 0))
 
+        filter_type = params.get("filter", "security")
+
         if camera and camera != "all":
             events = await self._coordinator.hass.async_add_executor_job(
                 load_events_index,
                 self._coordinator.media_path,
                 camera,
             )
-            events = events[offset : offset + limit]
         else:
             camera_names = list(self._coordinator.cameras.keys())
             events = await self._coordinator.hass.async_add_executor_job(
                 load_all_events,
                 self._coordinator.media_path,
                 camera_names,
-                limit,
-                offset,
             )
+
+        if filter_type == "security":
+            events = [e for e in events if e.get("alarm_active", False)]
+            
+        events = events[offset : offset + limit]
 
         # Sign snapshot URLs for event list thumbnails
         from homeassistant.components.http.auth import async_sign_path

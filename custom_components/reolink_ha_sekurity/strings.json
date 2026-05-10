@@ -35,13 +35,11 @@
           "clip_duration": "Segment duration",
           "lookback": "Pre-roll (lookback)",
           "post_roll": "Post-roll after detection ends",
-          "alarm_participation": "Participate in alarm notifications",
           "add_another": "Add another camera"
         },
         "data_description": {
           "record_sensors": "Person and vehicle are pre-selected. Add or remove as needed.",
-          "alarm_sensors": "Only these sensors will trigger the alarm, lights, and notifications.",
-          "alarm_participation": "When off, this camera records but never triggers notifications or lights"
+          "alarm_sensors": "Only these sensors will trigger the alarm, lights, and notifications."
         }
       }
     },
@@ -91,8 +89,7 @@
           "alarm_sensors": "Sensors that trigger an alarm/notification",
           "clip_duration": "Segment duration",
           "lookback": "Pre-roll (lookback)",
-          "post_roll": "Post-roll after detection ends",
-          "alarm_participation": "Participate in alarm notifications"
+          "post_roll": "Post-roll after detection ends"
         }
       },
       "edit_camera": {
@@ -110,8 +107,7 @@
           "alarm_sensors": "Sensors that trigger an alarm/notification",
           "clip_duration": "Segment duration",
           "lookback": "Pre-roll (lookback)",
-          "post_roll": "Post-roll after detection ends",
-          "alarm_participation": "Participate in alarm notifications"
+          "post_roll": "Post-roll after detection ends"
         }
       },
       "remove_camera": {

@@ -166,6 +166,7 @@ def _event_summary(metadata: dict) -> dict:
         "status": metadata["status"],
         "snapshot": metadata.get("snapshot"),
         "segment_count": len(metadata.get("segments", [])),
+        "alarm_active": metadata.get("alarm_active", False),
     }
 
 
@@ -213,9 +214,9 @@ def append_to_events_index(
 
 
 def load_all_events(
-    media_path: str, camera_names: list[str], limit: int = 25, offset: int = 0
+    media_path: str, camera_names: list[str]
 ) -> list[dict]:
-    """Load events from all cameras, sorted by time, with pagination."""
+    """Load events from all cameras, sorted by time."""
     all_events: list[dict] = []
     for camera_name in camera_names:
         events = load_events_index(media_path, camera_name)
@@ -224,4 +225,4 @@ def load_all_events(
     # Sort by started_at descending
     all_events.sort(key=lambda e: e.get("started_at", ""), reverse=True)
 
-    return all_events[offset : offset + limit]
+    return all_events

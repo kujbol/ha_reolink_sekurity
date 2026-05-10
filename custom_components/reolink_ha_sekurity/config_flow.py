@@ -23,7 +23,6 @@ from homeassistant.helpers.selector import (
 )
 
 from .const import (
-    CONF_ALARM_PARTICIPATION,
     CONF_CAMERA_ENTITY,
     CONF_CAMERA_NAME,
     CONF_CAMERAS,
@@ -527,9 +526,6 @@ class ReolinkHaSekurityOptionsFlow(config_entries.OptionsFlow):
                     ),
                     CONF_LOOKBACK: user_input.get(CONF_LOOKBACK, DEFAULT_LOOKBACK),
                     CONF_POST_ROLL: user_input.get(CONF_POST_ROLL, DEFAULT_POST_ROLL),
-                    CONF_ALARM_PARTICIPATION: user_input.get(
-                        CONF_ALARM_PARTICIPATION, True
-                    ),
                 }
                 new_data[CONF_CAMERAS] = cameras
                 self.hass.config_entries.async_update_entry(
@@ -592,9 +588,6 @@ class ReolinkHaSekurityOptionsFlow(config_entries.OptionsFlow):
                             min=0, max=60, step=5, mode=NumberSelectorMode.SLIDER, unit_of_measurement="seconds"
                         )
                     ),
-                    vol.Required(
-                        CONF_ALARM_PARTICIPATION, default=True
-                    ): BooleanSelector(),
                 }
             ),
             errors=errors,
@@ -658,7 +651,6 @@ class ReolinkHaSekurityOptionsFlow(config_entries.OptionsFlow):
                 cfg[CONF_CLIP_DURATION] = user_input.get(CONF_CLIP_DURATION, DEFAULT_CLIP_DURATION)
                 cfg[CONF_LOOKBACK] = user_input.get(CONF_LOOKBACK, DEFAULT_LOOKBACK)
                 cfg[CONF_POST_ROLL] = user_input.get(CONF_POST_ROLL, DEFAULT_POST_ROLL)
-                cfg[CONF_ALARM_PARTICIPATION] = user_input.get(CONF_ALARM_PARTICIPATION, True)
                 
                 cameras[self._current_camera_name] = cfg
                 new_data[CONF_CAMERAS] = cameras
@@ -718,9 +710,6 @@ class ReolinkHaSekurityOptionsFlow(config_entries.OptionsFlow):
                             min=0, max=60, step=5, mode=NumberSelectorMode.SLIDER, unit_of_measurement="seconds"
                         )
                     ),
-                    vol.Required(
-                        CONF_ALARM_PARTICIPATION, default=cfg.get(CONF_ALARM_PARTICIPATION, True)
-                    ): BooleanSelector(),
                 }
             ),
             errors=errors,
