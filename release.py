@@ -5,22 +5,29 @@ import subprocess
 from pathlib import Path
 
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: python3 release.py <version>")
-        print("Example: python3 release.py 0.1.9")
-        sys.exit(1)
-
-    version = sys.argv[1]
-    
     # Paths
     manifest_path = Path("custom_components/reolink_ha_sekurity/manifest.json")
     js_path = Path("custom_components/reolink_ha_sekurity/frontend/reolink-ha-sekurity-card.js")
     
+    with open(manifest_path, "r", encoding="utf-8") as f:
+        manifest = json.load(f)
+
+    if len(sys.argv) < 2:
+        current_version = manifest.get("version", "0.0.0")
+        parts = current_version.split(".")
+        if len(parts) >= 3 and parts[-1].isdigit():
+            parts[-1] = str(int(parts[-1]) + 1)
+            version = ".".join(parts)
+            print(f"No version provided. Auto-bumping from {current_version} to {version}")
+        else:
+            print("Failed to auto-bump current version. Please provide manually: python3 release.py <version>")
+            sys.exit(1)
+    else:
+        version = sys.argv[1]
+    
     print(f"Bumping version to {version}...")
     
     # 1. Update manifest.json
-    with open(manifest_path, "r", encoding="utf-8") as f:
-        manifest = json.load(f)
     manifest["version"] = version
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2)
@@ -55,6 +62,19 @@ def main():
     except subprocess.CalledProcessError as e:
         print(f"Failed to tag/push release: {e}")
         sys.exit(1)
+
+    # 5. Create GitHub Release
+    print(f"Creating GitHub Release v{version}...")
+    import shutil
+    if shutil.which("gh"):
+        try:
+            subprocess.run(["gh", "release", "create", f"v{version}", "--generate-notes"], check=True)
+        except subprocess.CalledProcessError as e:
+            print(f"⚠️ Failed to create GitHub release: {e}")
+            print("The tag was pushed, but you may need to create the release manually on GitHub.")
+    else:
+        print("⚠️ GitHub CLI (gh) is not installed. The tag was pushed, but the release could not be created automatically.")
+        print("Please install gh (e.g., brew install gh) or create the release manually on GitHub.")
 
     print(f"✅ Release v{version} deployed successfully!")
 
