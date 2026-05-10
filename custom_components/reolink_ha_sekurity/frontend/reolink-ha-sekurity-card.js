@@ -78,6 +78,10 @@ class ReolinkHaSekurityCard extends HTMLElement {
       this._cameras = resp.cameras || [];
       this._render();
     } catch (e) {
+      if (e.name === "AbortError" || e.message?.includes("AbortError")) {
+        console.debug("Fetch events aborted (likely due to rapid navigation)");
+        return;
+      }
       console.error("Failed to fetch events:", e);
     }
   }
@@ -91,6 +95,9 @@ class ReolinkHaSekurityCard extends HTMLElement {
       );
       return resp;
     } catch (e) {
+      if (e.name === "AbortError" || e.message?.includes("AbortError")) {
+        return null;
+      }
       console.error("Failed to fetch event detail:", e);
       return null;
     }

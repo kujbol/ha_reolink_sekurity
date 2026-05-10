@@ -61,7 +61,9 @@ from .recorder import EventRecorder
 
 _LOGGER = logging.getLogger(__name__)
 
-FRONTEND_SCRIPT_URL = "/reolink_ha_sekurity/reolink-ha-sekurity-card.js"
+# Use a dynamic cache buster so the browser always loads the latest version after an update
+import time
+FRONTEND_SCRIPT_URL = f"/reolink_ha_sekurity/reolink-ha-sekurity-card.js?v={int(time.time())}"
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
