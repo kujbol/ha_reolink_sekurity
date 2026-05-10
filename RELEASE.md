@@ -1,23 +1,17 @@
 # Release Instructions
 
-To release a new version of the **Reolink HA Sekurity** integration so that HACS users can seamlessly update it:
+To release a new version of the **Reolink HA Sekurity** integration so that HACS users can seamlessly update it, use the automated Python release script. This script automatically:
+1. Bumps the integration version in `manifest.json`.
+2. Bumps the frontend card version (`CARD_VERSION`) in the custom JavaScript UI.
+3. Commits the changes to the `main` branch.
+4. Creates and pushes the required lightweight Git tag so HACS can detect the new release.
 
-1. **Bump the Version:**
-   Update the `version` field in `custom_components/reolink_ha_sekurity/manifest.json` (e.g., to `"0.1.6"`).
+### How to use:
 
-2. **Commit and Push Changes:**
-   Commit all changes along with the version bump to the `main` branch.
-   ```bash
-   git add custom_components/reolink_ha_sekurity/manifest.json
-   git commit -m "chore: bump version to v0.1.6"
-   git push origin main
-   ```
+Run the script from the root of the project with the desired new version:
 
-3. **Tag the Release:**
-   Create a lightweight git tag matching the version (prefixed with `v`) and push it to the remote repository. HACS strictly relies on these tags to identify new releases.
-   ```bash
-   git tag v0.1.6
-   git push origin v0.1.6
-   ```
+```bash
+python3 release.py 0.1.9
+```
 
-Once the tag is pushed, HACS will automatically detect the new release version and prompt users to update.
+Once the script finishes successfully, the tag is pushed and HACS will automatically detect the new release version and prompt users to update.
