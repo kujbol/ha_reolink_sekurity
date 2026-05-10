@@ -169,18 +169,22 @@ class EventRecorder:
         snapshot_path = self.event_dir / snapshot_filename
 
         try:
-            await self.hass.services.async_call(
-                "camera",
-                "snapshot",
-                {
-                    "entity_id": self.camera_entity,
-                    "filename": str(snapshot_path),
-                },
-                blocking=True,
-            )
-            self.event_data["snapshot"] = snapshot_filename
-            _LOGGER.debug("Snapshot saved: %s", snapshot_path)
-            return snapshot_filename
+            from homeassistant.components.camera import async_get_image
+            
+            image = await async_get_image(self.hass, self.camera_entity)
+            if image and image.content:
+                def write_image():
+                    with open(snapshot_path, "wb") as f:
+                        f.write(image.content)
+                        
+                await self.hass.async_add_executor_job(write_image)
+                
+                self.event_data["snapshot"] = snapshot_filename
+                _LOGGER.debug("Snapshot saved: %s", snapshot_path)
+                return snapshot_filename
+            else:
+                _LOGGER.warning("Failed to get image content from %s", self.camera_entity)
+                return None
         except Exception:
             _LOGGER.exception("Failed to take snapshot for %s", self.event_id)
             return None

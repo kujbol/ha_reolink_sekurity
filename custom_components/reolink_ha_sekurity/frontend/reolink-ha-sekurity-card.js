@@ -5,7 +5,7 @@
  * live feed for active events, and segment playback.
  */
 
-const CARD_VERSION = "0.1.13";
+const CARD_VERSION = "0.1.14";
 
 class ReolinkHaSekurityCard extends HTMLElement {
   constructor() {
@@ -125,15 +125,22 @@ class ReolinkHaSekurityCard extends HTMLElement {
 
   _updateAlarmStates() {
     if (!this._hass) return;
-    const fullAlarm = this._hass.states["input_boolean.reolink_ha_sekurity_full_alarm"];
-    const nightAlarm = this._hass.states["input_boolean.reolink_ha_sekurity_night_alarm"];
+    const oldFull = this._fullAlarmOn;
+    const oldNight = this._nightAlarmOn;
+
+    const fullAlarm = this._hass.states["switch.reolink_ha_sekurity_full_alarm"];
+    const nightAlarm = this._hass.states["switch.reolink_ha_sekurity_night_alarm"];
     this._fullAlarmOn = fullAlarm && fullAlarm.state === "on";
     this._nightAlarmOn = nightAlarm && nightAlarm.state === "on";
+
+    if (oldFull !== this._fullAlarmOn || oldNight !== this._nightAlarmOn) {
+      this._render();
+    }
   }
 
   async _toggleAlarm(entityId) {
     if (!this._hass) return;
-    await this._hass.callService("input_boolean", "toggle", {
+    await this._hass.callService("switch", "toggle", {
       entity_id: entityId,
     });
   }
@@ -520,7 +527,7 @@ class ReolinkHaSekurityCard extends HTMLElement {
     if (fullBtn) {
       fullBtn.addEventListener("click", (e) => {
         e.stopPropagation();
-        this._toggleAlarm("input_boolean.reolink_ha_sekurity_full_alarm");
+        this._toggleAlarm("switch.reolink_ha_sekurity_full_alarm");
       });
     }
 
@@ -528,7 +535,7 @@ class ReolinkHaSekurityCard extends HTMLElement {
     if (nightBtn) {
       nightBtn.addEventListener("click", (e) => {
         e.stopPropagation();
-        this._toggleAlarm("input_boolean.reolink_ha_sekurity_night_alarm");
+        this._toggleAlarm("switch.reolink_ha_sekurity_night_alarm");
       });
     }
 

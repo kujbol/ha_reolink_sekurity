@@ -17,8 +17,8 @@ MAX_EVENTS_INDEX = 500  # max events kept in rolling index per camera
 DEFAULT_EVENTS_PAGE_SIZE = 25  # events shown in card by default
 
 # --- Alarm ---
-FULL_ALARM_ENTITY = f"input_boolean.{DOMAIN}_full_alarm"
-NIGHT_ALARM_ENTITY = f"input_boolean.{DOMAIN}_night_alarm"
+FULL_ALARM_ENTITY = f"switch.{DOMAIN}_full_alarm"
+NIGHT_ALARM_ENTITY = f"switch.{DOMAIN}_night_alarm"
 DEFAULT_NIGHT_START = "22:00"
 DEFAULT_NIGHT_END = "07:00"
 

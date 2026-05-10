@@ -213,8 +213,10 @@ class ReolinkHaSekurityCoordinator:
         _LOGGER.warning("[SEKURITY] Setting up Reolink HA Sekurity")
         _LOGGER.warning("[SEKURITY] Config cameras: %s", list(self.cameras.keys()))
 
-        # 1. Create input_boolean entities for alarm toggles
-        await self._create_alarm_toggles()
+        # 1. Forward to switch platform
+        self.hass.async_create_task(
+            self.hass.config_entries.async_forward_entry_setups(self.entry, ["switch"])
+        )
 
         # 2. Create media directories
         await self.hass.async_add_executor_job(self._create_media_dirs)
@@ -260,52 +262,6 @@ class ReolinkHaSekurityCoordinator:
             len(self.cameras),
             len(all_sensors),
         )
-
-    async def _create_alarm_toggles(self) -> None:
-        """Create input_boolean entities for alarm toggles if they don't exist."""
-        from homeassistant.setup import async_setup_component
-
-        # Ensure input_boolean component is loaded
-        await async_setup_component(self.hass, "input_boolean", {})
-
-        ib_collection = self.hass.data.get("input_boolean")
-
-        for entity_id, name in [
-            (FULL_ALARM_ENTITY, "Sekurity Full Alarm"),
-            (NIGHT_ALARM_ENTITY, "Sekurity Night Alarm"),
-        ]:
-            if self.hass.states.get(entity_id) is not None:
-                continue
-
-            object_id = entity_id.replace("input_boolean.", "")
-
-            # Use the storage collection to create a real input_boolean
-            if ib_collection and hasattr(ib_collection, "async_create_item"):
-                try:
-                    await ib_collection.async_create_item({
-                        "id": object_id,
-                        "name": name,
-                        "icon": "mdi:shield-home",
-                    })
-                    _LOGGER.warning(
-                        "[SEKURITY] Created input_boolean: %s", entity_id
-                    )
-                    continue
-                except Exception as exc:
-                    _LOGGER.warning(
-                        "[SEKURITY] Collection create failed for %s: %s",
-                        entity_id, exc,
-                    )
-
-            # Last resort fallback
-            self.hass.states.async_set(entity_id, "off", {
-                "friendly_name": name,
-                "icon": "mdi:shield-home",
-            })
-            _LOGGER.warning(
-                "[SEKURITY] Created alarm toggle state (fallback): %s",
-                entity_id,
-            )
 
     def _create_media_dirs(self) -> None:
         """Create camera directories on the NAS."""
