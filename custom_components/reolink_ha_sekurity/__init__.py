@@ -107,12 +107,19 @@ async def _async_register_lovelace_resource(hass: HomeAssistant):
 
     async def _add_resource(*args):
         # We might need to wait for lovelace to be fully loaded
+        resources = None
         for _ in range(60):
-            if "lovelace" in hass.data and "resources" in hass.data["lovelace"] and getattr(hass.data["lovelace"]["resources"], "loaded", False):
-                break
+            lovelace_data = hass.data.get("lovelace")
+            if lovelace_data:
+                if isinstance(lovelace_data, dict):
+                    resources = lovelace_data.get("resources")
+                else:
+                    resources = getattr(lovelace_data, "resources", None)
+                
+                if resources and getattr(resources, "loaded", False):
+                    break
             await asyncio.sleep(1)
             
-        resources = hass.data.get("lovelace", {}).get("resources")
         if not resources:
             _LOGGER.warning("Lovelace resources not available. Cannot auto-register card.")
             return
