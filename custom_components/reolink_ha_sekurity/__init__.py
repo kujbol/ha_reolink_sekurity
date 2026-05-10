@@ -30,6 +30,8 @@ from .const import (
     CONF_NOTIFY_TARGETS,
     CONF_POST_ROLL,
     CONF_TRIGGER_SENSORS,
+    CONF_RECORD_SENSORS,
+    CONF_ALARM_SENSORS,
     DEFAULT_CLIP_DURATION,
     DEFAULT_LIGHT_TIMEOUT,
     DEFAULT_LOOKBACK,
@@ -158,13 +160,14 @@ class ReolinkHaSekurityCoordinator:
         # 4. Build sensor → camera mapping and register listeners
         all_sensors = []
         for camera_name, cam_cfg in self.cameras.items():
+            record_sensors = cam_cfg.get(CONF_RECORD_SENSORS, cam_cfg.get(CONF_TRIGGER_SENSORS, []))
             _LOGGER.warning(
-                "[SEKURITY] Camera '%s': entity=%s, sensors=%s",
+                "[SEKURITY] Camera '%s': entity=%s, record_sensors=%s",
                 camera_name,
                 cam_cfg.get(CONF_CAMERA_ENTITY),
-                cam_cfg.get(CONF_TRIGGER_SENSORS, []),
+                record_sensors,
             )
-            for sensor in cam_cfg.get(CONF_TRIGGER_SENSORS, []):
+            for sensor in record_sensors:
                 self._sensor_to_camera[sensor] = camera_name
                 all_sensors.append(sensor)
 
@@ -290,7 +293,7 @@ class ReolinkHaSekurityCoordinator:
             return
 
         # Start a new event
-        event_type = EventRecorder._detect_event_type(entity_id)
+        event_type = EventRecorder._detect_event_type(self.hass, entity_id)
         _LOGGER.info(
             "New event: %s detected on %s (sensor: %s)",
             event_type,
@@ -317,9 +320,11 @@ class ReolinkHaSekurityCoordinator:
         )
 
         # Evaluate alarm (non-blocking — don't delay recording start)
+        alarm_sensors = cam_cfg.get(CONF_ALARM_SENSORS, cam_cfg.get(CONF_TRIGGER_SENSORS, []))
+        is_alarm_sensor = entity_id in alarm_sensors
         alarm_participation = cam_cfg.get(CONF_ALARM_PARTICIPATION, True)
 
-        if should_notify(
+        if is_alarm_sensor and should_notify(
             self.hass, alarm_participation, self.night_start, self.night_end
         ):
             recorder.event_data["alarm_active"] = True
@@ -334,7 +339,7 @@ class ReolinkHaSekurityCoordinator:
                 )
             )
 
-        if should_activate_lights(
+        if is_alarm_sensor and should_activate_lights(
             self.hass, alarm_participation, self.night_start, self.night_end
         ):
             recorder.event_data["lights_activated"] = True
@@ -351,9 +356,9 @@ class ReolinkHaSekurityCoordinator:
             recorder = self.active_events[camera_name]
             # Check if ALL trigger sensors for this camera are off
             cam_cfg = self.cameras.get(camera_name, {})
-            all_sensors = cam_cfg.get(CONF_TRIGGER_SENSORS, [])
+            record_sensors = cam_cfg.get(CONF_RECORD_SENSORS, cam_cfg.get(CONF_TRIGGER_SENSORS, []))
             any_still_on = False
-            for sensor in all_sensors:
+            for sensor in record_sensors:
                 state = self.hass.states.get(sensor)
                 if state and state.state in ("on", "detected"):
                     any_still_on = True

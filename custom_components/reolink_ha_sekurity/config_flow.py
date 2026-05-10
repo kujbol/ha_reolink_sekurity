@@ -38,6 +38,8 @@ from .const import (
     CONF_NOTIFY_TARGETS,
     CONF_POST_ROLL,
     CONF_TRIGGER_SENSORS,
+    CONF_RECORD_SENSORS,
+    CONF_ALARM_SENSORS,
     DEFAULT_CLIP_DURATION,
     DEFAULT_LIGHT_TIMEOUT,
     DEFAULT_LOOKBACK,
@@ -232,16 +234,18 @@ class ReolinkHaSekurityConfigFlow(
         errors = {}
 
         if user_input is not None:
-            trigger_sensors = user_input.get(CONF_TRIGGER_SENSORS, [])
+            record_sensors = user_input.get(CONF_RECORD_SENSORS, [])
+            alarm_sensors = user_input.get(CONF_ALARM_SENSORS, [])
 
-            if not trigger_sensors:
+            if not record_sensors:
                 errors["base"] = "no_sensors"
             else:
                 camera_name = self._current_camera_name
                 self._cameras[camera_name] = {
                     CONF_CAMERA_ENTITY: self._current_camera_entity,
                     CONF_CAMERA_NAME: camera_name,
-                    CONF_TRIGGER_SENSORS: trigger_sensors,
+                    CONF_RECORD_SENSORS: record_sensors,
+                    CONF_ALARM_SENSORS: alarm_sensors,
                     CONF_CLIP_DURATION: user_input.get(
                         CONF_CLIP_DURATION, DEFAULT_CLIP_DURATION
                     ),
@@ -276,7 +280,10 @@ class ReolinkHaSekurityConfigFlow(
         if self._available_sensors:
             sensor_entity_ids = [s["entity_id"] for s in self._available_sensors]
             sensor_schema = vol.Required(
-                CONF_TRIGGER_SENSORS, default=default_sensors
+                CONF_RECORD_SENSORS, default=default_sensors
+            )
+            alarm_sensor_schema = vol.Required(
+                CONF_ALARM_SENSORS, default=default_sensors
             )
             sensor_selector = EntitySelector(
                 EntitySelectorConfig(
@@ -287,7 +294,8 @@ class ReolinkHaSekurityConfigFlow(
             )
         else:
             # Fallback — no auto-discovery, show all binary sensors
-            sensor_schema = vol.Required(CONF_TRIGGER_SENSORS, default=[])
+            sensor_schema = vol.Required(CONF_RECORD_SENSORS, default=[])
+            alarm_sensor_schema = vol.Required(CONF_ALARM_SENSORS, default=[])
             sensor_selector = EntitySelector(
                 EntitySelectorConfig(domain="binary_sensor", multiple=True)
             )
@@ -297,6 +305,7 @@ class ReolinkHaSekurityConfigFlow(
             data_schema=vol.Schema(
                 {
                     sensor_schema: sensor_selector,
+                    alarm_sensor_schema: sensor_selector,
                     vol.Required(
                         CONF_CLIP_DURATION, default=DEFAULT_CLIP_DURATION
                     ): NumberSelector(
@@ -353,7 +362,7 @@ class ReolinkHaSekurityOptionsFlow(config_entries.OptionsFlow):
         """Main options menu."""
         return self.async_show_menu(
             step_id="init",
-            menu_options=["global_settings", "add_camera", "remove_camera"],
+            menu_options=["global_settings", "add_camera", "edit_camera", "remove_camera"],
         )
 
     async def async_step_global_settings(
@@ -443,26 +452,56 @@ class ReolinkHaSekurityOptionsFlow(config_entries.OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.ConfigFlowResult:
         """Add a new camera."""
+        if user_input is not None:
+            self._current_camera_entity = user_input[CONF_CAMERA_ENTITY]
+            self._current_camera_name = user_input.get(
+                CONF_CAMERA_NAME, _derive_camera_name(self._current_camera_entity)
+            )
+            self._current_camera_name = re.sub(
+                r"[^a-zA-Z0-9_]", "_", self._current_camera_name
+            ).lower()
+
+            # Auto-discover sensors on this camera's device
+            self._available_sensors = _find_device_sensors(
+                self.hass, self._current_camera_entity
+            )
+            return await self.async_step_add_camera_sensors()
+
+        return self.async_show_form(
+            step_id="add_camera",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_CAMERA_ENTITY): EntitySelector(
+                        EntitySelectorConfig(domain="camera")
+                    ),
+                    vol.Optional(CONF_CAMERA_NAME): TextSelector(
+                        TextSelectorConfig(type="text")
+                    ),
+                }
+            ),
+        )
+
+    async def async_step_add_camera_sensors(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        """Step 2b: Select sensors for new camera."""
         errors = {}
         current = self._config_entry.data
 
         if user_input is not None:
-            camera_entity = user_input[CONF_CAMERA_ENTITY]
-            camera_name = user_input.get(
-                CONF_CAMERA_NAME, _derive_camera_name(camera_entity)
-            )
-            camera_name = re.sub(r"[^a-zA-Z0-9_]", "_", camera_name).lower()
-            trigger_sensors = user_input.get(CONF_TRIGGER_SENSORS, [])
+            record_sensors = user_input.get(CONF_RECORD_SENSORS, [])
+            alarm_sensors = user_input.get(CONF_ALARM_SENSORS, [])
 
-            if not trigger_sensors:
+            if not record_sensors:
                 errors["base"] = "no_sensors"
             else:
                 new_data = {**current}
                 cameras = dict(new_data.get(CONF_CAMERAS, {}))
-                cameras[camera_name] = {
-                    CONF_CAMERA_ENTITY: camera_entity,
-                    CONF_CAMERA_NAME: camera_name,
-                    CONF_TRIGGER_SENSORS: trigger_sensors,
+                cameras[self._current_camera_name] = {
+                    CONF_CAMERA_ENTITY: self._current_camera_entity,
+                    CONF_CAMERA_NAME: self._current_camera_name,
+                    CONF_RECORD_SENSORS: record_sensors,
+                    CONF_ALARM_SENSORS: alarm_sensors,
                     CONF_CLIP_DURATION: user_input.get(
                         CONF_CLIP_DURATION, DEFAULT_CLIP_DURATION
                     ),
@@ -478,21 +517,40 @@ class ReolinkHaSekurityOptionsFlow(config_entries.OptionsFlow):
                 )
                 return self.async_create_entry(title="", data={})
 
+        default_sensors = [
+            s["entity_id"]
+            for s in self._available_sensors
+            if s["type"] in ("person", "vehicle")
+        ]
+
+        if self._available_sensors:
+            sensor_entity_ids = [s["entity_id"] for s in self._available_sensors]
+            sensor_schema = vol.Required(
+                CONF_RECORD_SENSORS, default=default_sensors
+            )
+            alarm_sensor_schema = vol.Required(
+                CONF_ALARM_SENSORS, default=default_sensors
+            )
+            sensor_selector = EntitySelector(
+                EntitySelectorConfig(
+                    domain="binary_sensor",
+                    multiple=True,
+                    include_entities=sensor_entity_ids,
+                )
+            )
+        else:
+            sensor_schema = vol.Required(CONF_RECORD_SENSORS, default=[])
+            alarm_sensor_schema = vol.Required(CONF_ALARM_SENSORS, default=[])
+            sensor_selector = EntitySelector(
+                EntitySelectorConfig(domain="binary_sensor", multiple=True)
+            )
+
         return self.async_show_form(
-            step_id="add_camera",
+            step_id="add_camera_sensors",
             data_schema=vol.Schema(
                 {
-                    vol.Required(CONF_CAMERA_ENTITY): EntitySelector(
-                        EntitySelectorConfig(domain="camera")
-                    ),
-                    vol.Optional(CONF_CAMERA_NAME): TextSelector(
-                        TextSelectorConfig(type="text")
-                    ),
-                    vol.Required(CONF_TRIGGER_SENSORS, default=[]): EntitySelector(
-                        EntitySelectorConfig(
-                            domain="binary_sensor", multiple=True
-                        )
-                    ),
+                    sensor_schema: sensor_selector,
+                    alarm_sensor_schema: sensor_selector,
                     vol.Required(
                         CONF_CLIP_DURATION, default=DEFAULT_CLIP_DURATION
                     ): NumberSelector(
@@ -520,6 +578,136 @@ class ReolinkHaSekurityOptionsFlow(config_entries.OptionsFlow):
                 }
             ),
             errors=errors,
+            description_placeholders={
+                "camera_name": self._current_camera_name,
+                "sensor_count": str(len(self._available_sensors)),
+            },
+        )
+
+    async def async_step_edit_camera(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        """Edit an existing camera."""
+        current = self._config_entry.data
+        cameras = current.get(CONF_CAMERAS, {})
+
+        if not cameras:
+            return self.async_abort(reason="no_cameras")
+
+        if user_input is not None:
+            self._current_camera_name = user_input["camera_name"]
+            self._current_camera_cfg = cameras[self._current_camera_name]
+            
+            # Auto-discover sensors on this camera's device
+            self._available_sensors = _find_device_sensors(
+                self.hass, self._current_camera_cfg.get(CONF_CAMERA_ENTITY)
+            )
+            return await self.async_step_edit_camera_sensors()
+
+        camera_names = {name: name for name in cameras}
+
+        return self.async_show_form(
+            step_id="edit_camera",
+            data_schema=vol.Schema(
+                {
+                    vol.Required("camera_name"): vol.In(camera_names),
+                }
+            ),
+        )
+
+    async def async_step_edit_camera_sensors(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        """Edit sensors for an existing camera."""
+        errors = {}
+        current = self._config_entry.data
+
+        if user_input is not None:
+            record_sensors = user_input.get(CONF_RECORD_SENSORS, [])
+            alarm_sensors = user_input.get(CONF_ALARM_SENSORS, [])
+
+            if not record_sensors:
+                errors["base"] = "no_sensors"
+            else:
+                new_data = {**current}
+                cameras = dict(new_data.get(CONF_CAMERAS, {}))
+                cfg = dict(cameras[self._current_camera_name])
+                
+                cfg[CONF_RECORD_SENSORS] = record_sensors
+                cfg[CONF_ALARM_SENSORS] = alarm_sensors
+                cfg[CONF_CLIP_DURATION] = user_input.get(CONF_CLIP_DURATION, DEFAULT_CLIP_DURATION)
+                cfg[CONF_LOOKBACK] = user_input.get(CONF_LOOKBACK, DEFAULT_LOOKBACK)
+                cfg[CONF_POST_ROLL] = user_input.get(CONF_POST_ROLL, DEFAULT_POST_ROLL)
+                cfg[CONF_ALARM_PARTICIPATION] = user_input.get(CONF_ALARM_PARTICIPATION, True)
+                
+                cameras[self._current_camera_name] = cfg
+                new_data[CONF_CAMERAS] = cameras
+                
+                self.hass.config_entries.async_update_entry(
+                    self._config_entry, data=new_data
+                )
+                return self.async_create_entry(title="", data={})
+
+        cfg = self._current_camera_cfg
+        # Migration from trigger_sensors if it hasn't been migrated yet
+        def_record = cfg.get(CONF_RECORD_SENSORS, cfg.get(CONF_TRIGGER_SENSORS, []))
+        def_alarm = cfg.get(CONF_ALARM_SENSORS, cfg.get(CONF_TRIGGER_SENSORS, []))
+
+        if self._available_sensors:
+            sensor_entity_ids = [s["entity_id"] for s in self._available_sensors]
+            sensor_schema = vol.Required(CONF_RECORD_SENSORS, default=def_record)
+            alarm_sensor_schema = vol.Required(CONF_ALARM_SENSORS, default=def_alarm)
+            sensor_selector = EntitySelector(
+                EntitySelectorConfig(
+                    domain="binary_sensor",
+                    multiple=True,
+                    include_entities=sensor_entity_ids,
+                )
+            )
+        else:
+            sensor_schema = vol.Required(CONF_RECORD_SENSORS, default=def_record)
+            alarm_sensor_schema = vol.Required(CONF_ALARM_SENSORS, default=def_alarm)
+            sensor_selector = EntitySelector(
+                EntitySelectorConfig(domain="binary_sensor", multiple=True)
+            )
+
+        return self.async_show_form(
+            step_id="edit_camera_sensors",
+            data_schema=vol.Schema(
+                {
+                    sensor_schema: sensor_selector,
+                    alarm_sensor_schema: sensor_selector,
+                    vol.Required(
+                        CONF_CLIP_DURATION, default=cfg.get(CONF_CLIP_DURATION, DEFAULT_CLIP_DURATION)
+                    ): NumberSelector(
+                        NumberSelectorConfig(
+                            min=10, max=120, step=5, mode=NumberSelectorMode.SLIDER, unit_of_measurement="seconds"
+                        )
+                    ),
+                    vol.Required(
+                        CONF_LOOKBACK, default=cfg.get(CONF_LOOKBACK, DEFAULT_LOOKBACK)
+                    ): NumberSelector(
+                        NumberSelectorConfig(
+                            min=0, max=10, step=1, mode=NumberSelectorMode.SLIDER, unit_of_measurement="seconds"
+                        )
+                    ),
+                    vol.Required(
+                        CONF_POST_ROLL, default=cfg.get(CONF_POST_ROLL, DEFAULT_POST_ROLL)
+                    ): NumberSelector(
+                        NumberSelectorConfig(
+                            min=0, max=60, step=5, mode=NumberSelectorMode.SLIDER, unit_of_measurement="seconds"
+                        )
+                    ),
+                    vol.Required(
+                        CONF_ALARM_PARTICIPATION, default=cfg.get(CONF_ALARM_PARTICIPATION, True)
+                    ): BooleanSelector(),
+                }
+            ),
+            errors=errors,
+            description_placeholders={
+                "camera_name": self._current_camera_name,
+                "sensor_count": str(len(self._available_sensors)),
+            },
         )
 
     async def async_step_remove_camera(

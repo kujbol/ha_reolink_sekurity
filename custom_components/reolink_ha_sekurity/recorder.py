@@ -97,7 +97,7 @@ class EventRecorder:
 
     def upgrade_event_type(self, trigger_entity: str) -> None:
         """Upgrade event type if a higher-priority detection fires."""
-        new_type = self._detect_event_type(trigger_entity)
+        new_type = self._detect_event_type(self.hass, trigger_entity)
         current_priority = EVENT_TYPE_PRIORITY.get(
             self.event_data["event_type"], 0
         )
@@ -114,12 +114,24 @@ class EventRecorder:
             self.event_data["trigger_entity"] = trigger_entity
 
     @staticmethod
-    def _detect_event_type(entity_id: str) -> str:
-        """Derive event type from the binary sensor entity ID."""
-        entity_id_lower = entity_id.lower()
-        for event_type in ("person", "visitor", "vehicle", "pet", "animal"):
-            if f"_{event_type}" in entity_id_lower:
-                return event_type
+    def _detect_event_type(hass: HomeAssistant, entity_id: str) -> str:
+        """Derive event type from the binary sensor entity ID, unique ID, or original name."""
+        from homeassistant.helpers import entity_registry as er
+        ent_reg = er.async_get(hass)
+        entry = ent_reg.async_get(entity_id)
+
+        check_strings = [entity_id.lower()]
+        if entry:
+            if entry.unique_id:
+                check_strings.append(entry.unique_id.lower())
+            if entry.original_name:
+                check_strings.append(entry.original_name.lower())
+
+        for check_str in check_strings:
+            for event_type in ("person", "visitor", "vehicle", "pet", "animal"):
+                # Check for common patterns like _person, or just the word "person"
+                if f"_{event_type}" in check_str or f" {event_type}" in check_str or f"-{event_type}" in check_str:
+                    return event_type
         return "motion"
 
     def _should_continue(self) -> bool:

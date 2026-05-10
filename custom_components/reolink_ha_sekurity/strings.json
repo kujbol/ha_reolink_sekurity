@@ -30,7 +30,8 @@
         "title": "Configure Sensors — {camera_name}",
         "description": "Found {sensor_count} detection sensors. Select which ones to monitor.",
         "data": {
-          "trigger_sensors": "Detection sensors to monitor",
+          "record_sensors": "Sensors that trigger a recording",
+          "alarm_sensors": "Sensors that trigger an alarm/notification",
           "clip_duration": "Segment duration",
           "lookback": "Pre-roll (lookback)",
           "post_roll": "Post-roll after detection ends",
@@ -38,7 +39,8 @@
           "add_another": "Add another camera"
         },
         "data_description": {
-          "trigger_sensors": "Person and vehicle are pre-selected. Add or remove as needed.",
+          "record_sensors": "Person and vehicle are pre-selected. Add or remove as needed.",
+          "alarm_sensors": "Only these sensors will trigger the alarm, lights, and notifications.",
           "alarm_participation": "When off, this camera records but never triggers notifications or lights"
         }
       }
@@ -57,6 +59,7 @@
         "menu_options": {
           "global_settings": "Edit global settings",
           "add_camera": "Add a camera",
+          "edit_camera": "Edit a camera",
           "remove_camera": "Remove a camera"
         }
       },
@@ -74,10 +77,37 @@
       },
       "add_camera": {
         "title": "Add Camera",
+        "description": "Select a camera entity to add.",
         "data": {
           "camera_entity": "Camera entity",
-          "camera_name": "Camera name (auto-derived if empty)",
-          "trigger_sensors": "Detection sensors to monitor",
+          "camera_name": "Camera name (auto-derived if empty)"
+        }
+      },
+      "add_camera_sensors": {
+        "title": "Configure Sensors — {camera_name}",
+        "description": "Found {sensor_count} detection sensors. Select which ones to monitor.",
+        "data": {
+          "record_sensors": "Sensors that trigger a recording",
+          "alarm_sensors": "Sensors that trigger an alarm/notification",
+          "clip_duration": "Segment duration",
+          "lookback": "Pre-roll (lookback)",
+          "post_roll": "Post-roll after detection ends",
+          "alarm_participation": "Participate in alarm notifications"
+        }
+      },
+      "edit_camera": {
+        "title": "Edit Camera",
+        "description": "Select a camera to edit.",
+        "data": {
+          "camera_name": "Camera to edit"
+        }
+      },
+      "edit_camera_sensors": {
+        "title": "Edit Sensors — {camera_name}",
+        "description": "Edit the recording and alarm configuration for {camera_name}.",
+        "data": {
+          "record_sensors": "Sensors that trigger a recording",
+          "alarm_sensors": "Sensors that trigger an alarm/notification",
           "clip_duration": "Segment duration",
           "lookback": "Pre-roll (lookback)",
           "post_roll": "Post-roll after detection ends",
