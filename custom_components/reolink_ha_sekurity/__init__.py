@@ -15,7 +15,6 @@ from homeassistant.helpers.typing import ConfigType
 
 from .alarm import should_activate_lights, should_notify
 from .const import (
-    CONF_ALARM_PARTICIPATION,
     CONF_CAMERA_ENTITY,
     CONF_CAMERA_NAME,
     CONF_CAMERAS,
@@ -94,7 +93,68 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = coordinator
     await coordinator.async_setup()
+
+    # Automatically register the Lovelace resource
+    hass.async_create_task(_async_register_lovelace_resource(hass))
+
     return True
+
+async def _async_register_lovelace_resource(hass: HomeAssistant):
+    """Register the custom card in the Lovelace resource registry."""
+    from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
+    from homeassistant.core import CoreState
+    import asyncio
+
+    async def _add_resource(*args):
+        # We might need to wait for lovelace to be fully loaded
+        for _ in range(60):
+            if "lovelace" in hass.data and "resources" in hass.data["lovelace"] and getattr(hass.data["lovelace"]["resources"], "loaded", False):
+                break
+            await asyncio.sleep(1)
+            
+        resources = hass.data.get("lovelace", {}).get("resources")
+        if not resources:
+            _LOGGER.warning("Lovelace resources not available. Cannot auto-register card.")
+            return
+            
+        if not hasattr(resources, "async_create_item"):
+            _LOGGER.warning("Lovelace resources is in YAML mode. You must manually add the resource to configuration.yaml.")
+            return
+
+        # Check if our resource is already registered
+        url_base = "/reolink_ha_sekurity/reolink-ha-sekurity-card.js"
+        exists = False
+        
+        for item in resources.async_items():
+            if item.get("url", "").startswith(url_base):
+                exists = True
+                # Update the URL if we changed the cache buster
+                if item.get("url") != FRONTEND_SCRIPT_URL and hasattr(resources, "async_update_item"):
+                    try:
+                        await resources.async_update_item(item["id"], {
+                            "res_type": "module",
+                            "url": FRONTEND_SCRIPT_URL
+                        })
+                        _LOGGER.info("Updated Reolink HA Sekurity Lovelace resource URL")
+                    except Exception as e:
+                        _LOGGER.error("Failed to update Lovelace resource: %s", e)
+                break
+
+        if not exists:
+            try:
+                await resources.async_create_item({
+                    "res_type": "module",
+                    "url": FRONTEND_SCRIPT_URL
+                })
+                _LOGGER.info("Registered Reolink HA Sekurity custom card as a Lovelace resource")
+            except Exception as e:
+                _LOGGER.error("Failed to register Lovelace resource: %s", e)
+
+    if hass.state == CoreState.running:
+        hass.async_create_task(_add_resource())
+    else:
+        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _add_resource)
+
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

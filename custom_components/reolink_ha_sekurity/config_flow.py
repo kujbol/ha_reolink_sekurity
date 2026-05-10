@@ -270,9 +270,6 @@ class ReolinkHaSekurityConfigFlow(
                     ),
                     CONF_LOOKBACK: user_input.get(CONF_LOOKBACK, DEFAULT_LOOKBACK),
                     CONF_POST_ROLL: user_input.get(CONF_POST_ROLL, DEFAULT_POST_ROLL),
-                    CONF_ALARM_PARTICIPATION: user_input.get(
-                        CONF_ALARM_PARTICIPATION, True
-                    ),
                 }
 
                 # Check if user wants to add more cameras
@@ -346,9 +343,6 @@ class ReolinkHaSekurityConfigFlow(
                             min=0, max=60, step=5, mode=NumberSelectorMode.SLIDER, unit_of_measurement="seconds"
                         )
                     ),
-                    vol.Required(
-                        CONF_ALARM_PARTICIPATION, default=True
-                    ): BooleanSelector(),
                     vol.Optional("add_another", default=False): BooleanSelector(),
                 }
             ),

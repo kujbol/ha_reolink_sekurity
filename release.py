@@ -47,7 +47,7 @@ def main():
     
     # 3. Git commit and push
     try:
-        subprocess.run(["git", "add", str(manifest_path), str(js_path)], check=True)
+        subprocess.run(["git", "add", "."], check=True)
         subprocess.run(["git", "commit", "-m", f"chore: release v{version}"], check=True)
         subprocess.run(["git", "push", "origin", "main"], check=True)
     except subprocess.CalledProcessError as e:
