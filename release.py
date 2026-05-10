@@ -66,9 +66,13 @@ def main():
     # 5. Create GitHub Release
     print(f"Creating GitHub Release v{version}...")
     import shutil
-    if shutil.which("gh"):
+    import os
+    env = os.environ.copy()
+    env["PATH"] = f"/opt/homebrew/bin:/usr/local/bin:{env.get('PATH', '')}"
+    
+    if shutil.which("gh", path=env["PATH"]):
         try:
-            subprocess.run(["gh", "release", "create", f"v{version}", "--generate-notes"], check=True)
+            subprocess.run(["gh", "release", "create", f"v{version}", "--generate-notes"], check=True, env=env)
         except subprocess.CalledProcessError as e:
             print(f"⚠️ Failed to create GitHub release: {e}")
             print("The tag was pushed, but you may need to create the release manually on GitHub.")
