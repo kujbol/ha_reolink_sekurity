@@ -1,7 +1,7 @@
 {
   "domain": "reolink_ha_sekurity",
   "name": "Reolink HA Sekurity",
-  "version": "0.1.18",
+  "version": "0.1.19",
   "documentation": "https://github.com/kujbol/ha_reolink_sekurity",
   "issue_tracker": "https://github.com/kujbol/ha_reolink_sekurity/issues",
   "codeowners": [

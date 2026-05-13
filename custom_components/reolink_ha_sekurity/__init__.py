@@ -349,9 +349,10 @@ class ReolinkHaSekurityCoordinator:
         )
         self.active_events[camera_name] = recorder
 
-        # Launch recording as background task
-        recorder.task = self.hass.async_create_task(
-            self._run_and_cleanup(camera_name, recorder)
+        # Launch recording as background task (must not block HA startup)
+        recorder.task = self.hass.async_create_background_task(
+            self._run_and_cleanup(camera_name, recorder),
+            name=f"sekurity_record_{camera_name}",
         )
 
         # Evaluate alarm (non-blocking — don't delay recording start)
