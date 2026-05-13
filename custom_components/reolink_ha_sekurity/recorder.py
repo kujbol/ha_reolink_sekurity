@@ -214,6 +214,9 @@ class EventRecorder:
             self.lookback if self._segment_index == 1 else DEFAULT_SEGMENT_OVERLAP
         )
 
+        # Track timing to detect when camera.record returns too fast (stream failure)
+        segment_start = datetime.now(timezone.utc)
+
         try:
             _LOGGER.debug(
                 "Recording segment %d for %s (duration=%d, lookback=%d)",
@@ -233,6 +236,25 @@ class EventRecorder:
                 },
                 blocking=True,
             )
+
+            # Verify the file was actually created with content.
+            # camera.record can return without error but fail to capture
+            # anything (HA stream logs "Recording failed to capture anything"
+            # internally without raising).
+            file_ok = await self.hass.async_add_executor_job(
+                lambda: segment_path.exists() and segment_path.stat().st_size > 1024
+            )
+            if not file_ok:
+                elapsed = (datetime.now(timezone.utc) - segment_start).total_seconds()
+                _LOGGER.warning(
+                    "Segment %d for %s has no content (took %.1fs) — "
+                    "camera stream may be unavailable",
+                    self._segment_index,
+                    self.event_id,
+                    elapsed,
+                )
+                self._segment_index -= 1  # Don't count this segment
+                return None
 
             # Update metadata
             add_segment_to_metadata(
@@ -261,6 +283,7 @@ class EventRecorder:
                 self._segment_index,
                 self.event_id,
             )
+            self._segment_index -= 1  # Don't count failed segments
             return None
 
     async def run(self) -> None:
@@ -304,8 +327,15 @@ class EventRecorder:
                             "3 consecutive recording failures",
                         )
                         break
-                    # Brief pause before retry
-                    await asyncio.sleep(2)
+                    # Back off with increasing delay to avoid hammering a failing camera
+                    retry_delay = min(5 * (2 ** (consecutive_failures - 1)), 30)
+                    _LOGGER.warning(
+                        "Recording attempt %d failed for %s — retrying in %ds",
+                        consecutive_failures,
+                        self.event_id,
+                        retry_delay,
+                    )
+                    await asyncio.sleep(retry_delay)
                 else:
                     consecutive_failures = 0
 

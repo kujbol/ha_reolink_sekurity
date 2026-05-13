@@ -5,7 +5,7 @@
  * live feed for active events, and segment playback.
  */
 
-const CARD_VERSION = "0.1.16";
+const CARD_VERSION = "0.1.17";
 
 class ReolinkHaSekurityCard extends HTMLElement {
   constructor() {
@@ -337,10 +337,10 @@ class ReolinkHaSekurityCard extends HTMLElement {
       }
       .live-feed {
         width: 100%;
+        max-height: 250px;
         border-radius: 8px;
         background: #000;
         margin-bottom: 8px;
-        aspect-ratio: 16/9;
         object-fit: contain;
       }
       .video-player {
@@ -662,13 +662,14 @@ class ReolinkHaSekurityCard extends HTMLElement {
       });
     }
 
-    // Auto-refresh for active events
+    // Auto-refresh for active events (only when video is not playing)
     if (is_active) {
-      setTimeout(() => {
-        if (this._expandedEventId === eventId) {
-          this._loadEventDetail(eventId);
-        }
-      }, 10000);
+      this._activeDetailTimer = setTimeout(() => {
+        if (this._expandedEventId !== eventId) return;
+        const vid = this.shadowRoot.querySelector(`#player-${eventId}`);
+        if (vid && !vid.paused && !vid.ended) return; // Don't interrupt playback
+        this._loadEventDetail(eventId);
+      }, 30000);
     }
   }
 
