@@ -298,7 +298,7 @@ class ReolinkHaSekurityCoordinator:
         if state_value in ("on", "detected"):
             _LOGGER.warning("[SEKURITY] DETECTION: %s on %s", entity_id, camera_name)
             await self._handle_sensor_on(entity_id, camera_name, cam_cfg)
-        elif state_value in ("off", "clear") and old_state and old_state.state in ("on", "detected"):
+        elif state_value in ("off", "clear", "unavailable", "unknown") and old_state and old_state.state in ("on", "detected"):
             await self._handle_sensor_off(entity_id, camera_name)
 
     async def _handle_sensor_on(
@@ -334,6 +334,7 @@ class ReolinkHaSekurityCoordinator:
             event_type=event_type,
             media_path=self.media_path,
             clip_duration=cam_cfg.get(CONF_CLIP_DURATION, DEFAULT_CLIP_DURATION),
+            max_duration=cam_cfg.get(CONF_MAX_DURATION, DEFAULT_MAX_DURATION),
             lookback=cam_cfg.get(CONF_LOOKBACK, DEFAULT_LOOKBACK),
             post_roll=cam_cfg.get(CONF_POST_ROLL, DEFAULT_POST_ROLL),
         )

@@ -43,6 +43,7 @@ class EventRecorder:
         event_type: str,
         media_path: str,
         clip_duration: int = DEFAULT_CLIP_DURATION,
+        max_duration: int = 300,
         lookback: int = DEFAULT_LOOKBACK,
         post_roll: int = DEFAULT_POST_ROLL,
         merge_window: int = DEFAULT_MERGE_WINDOW,
@@ -52,6 +53,7 @@ class EventRecorder:
         self.camera_name = camera_name
         self.media_path = media_path
         self.clip_duration = clip_duration
+        self.max_duration = max_duration
         self.lookback = lookback
         self.post_roll = post_roll
         self.merge_window = merge_window
@@ -137,6 +139,18 @@ class EventRecorder:
     def _should_continue(self) -> bool:
         """Determine if we should record another segment."""
         if self._stopped:
+            return False
+
+        # Enforce max duration to prevent infinite recordings
+        event_started_at = datetime.fromisoformat(self.event_data["started_at"])
+        elapsed_total = (datetime.now(timezone.utc) - event_started_at).total_seconds()
+        
+        if elapsed_total >= self.max_duration:
+            _LOGGER.warning(
+                "Event %s reached max_duration (%ds). Forcing stop.",
+                self.event_id,
+                self.max_duration,
+            )
             return False
 
         if self._sensor_on:

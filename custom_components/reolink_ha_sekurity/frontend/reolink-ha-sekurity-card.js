@@ -5,7 +5,7 @@
  * live feed for active events, and segment playback.
  */
 
-const CARD_VERSION = "0.1.14";
+const CARD_VERSION = "0.1.15";
 
 class ReolinkHaSekurityCard extends HTMLElement {
   constructor() {
@@ -76,7 +76,11 @@ class ReolinkHaSekurityCard extends HTMLElement {
       this._events = resp.events || [];
       this._activeEvents = resp.active_events || {};
       this._cameras = resp.cameras || [];
-      this._render();
+      
+      // Do not re-render if an event is currently expanded to prevent interrupting playback
+      if (!this._expandedEventId) {
+        this._render();
+      }
     } catch (e) {
       if (e.name === "AbortError" || e.message?.includes("AbortError")) {
         console.debug("Fetch events aborted (likely due to rapid navigation)");
@@ -228,13 +232,14 @@ class ReolinkHaSekurityCard extends HTMLElement {
       }
       .camera-tabs {
         display: flex;
-        gap: 4px;
+        flex-wrap: wrap;
+        gap: 6px;
         padding: 8px 16px;
-        overflow-x: auto;
       }
       .filter-tabs {
         display: flex;
-        gap: 4px;
+        flex-wrap: wrap;
+        gap: 6px;
       }
       .camera-tab {
         padding: 4px 12px;
@@ -579,10 +584,9 @@ class ReolinkHaSekurityCard extends HTMLElement {
 
     // Live feed for active events
     if (is_active && camera_entity) {
-      const proxyUrl = `/api/camera_proxy_stream/${camera_entity}?token=${this._hass.auth.data.access_token}`;
       html += `
         <div class="detail-meta">🔴 LIVE — streaming from ${(metadata.camera || "").replace(/_/g, " ")}</div>
-        <img class="live-feed" src="${proxyUrl}" alt="Live feed">
+        <ha-camera-stream id="live-${eventId}" allow-exoplayer="true" muted="true" class="live-feed"></ha-camera-stream>
       `;
     }
 
@@ -617,6 +621,13 @@ class ReolinkHaSekurityCard extends HTMLElement {
     `;
 
     container.innerHTML = html;
+
+    // Bind ha-camera-stream properties
+    const streamEl = container.querySelector(`#live-${eventId}`);
+    if (streamEl && camera_entity) {
+      streamEl.hass = this._hass;
+      streamEl.stateObj = this._hass.states[camera_entity];
+    }
 
     // Wire up segment buttons
     container.querySelectorAll(".seg-btn[data-seg-url]").forEach((btn) => {

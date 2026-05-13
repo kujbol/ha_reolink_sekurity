@@ -50,5 +50,7 @@ CONF_TRIGGER_SENSORS = "trigger_sensors" # Deprecated, kept for migration
 CONF_RECORD_SENSORS = "record_sensors"
 CONF_ALARM_SENSORS = "alarm_sensors"
 CONF_CLIP_DURATION = "clip_duration"
+CONF_MAX_DURATION = "max_duration"
+DEFAULT_MAX_DURATION = 300
 CONF_LOOKBACK = "lookback"
 CONF_POST_ROLL = "post_roll"

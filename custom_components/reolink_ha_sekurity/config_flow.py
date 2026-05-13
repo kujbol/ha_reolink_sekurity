@@ -268,6 +268,9 @@ class ReolinkHaSekurityConfigFlow(
                     CONF_CLIP_DURATION: user_input.get(
                         CONF_CLIP_DURATION, DEFAULT_CLIP_DURATION
                     ),
+                    CONF_MAX_DURATION: user_input.get(
+                        CONF_MAX_DURATION, DEFAULT_MAX_DURATION
+                    ),
                     CONF_LOOKBACK: user_input.get(CONF_LOOKBACK, DEFAULT_LOOKBACK),
                     CONF_POST_ROLL: user_input.get(CONF_POST_ROLL, DEFAULT_POST_ROLL),
                 }
@@ -327,6 +330,13 @@ class ReolinkHaSekurityConfigFlow(
                     ): NumberSelector(
                         NumberSelectorConfig(
                             min=10, max=120, step=5, mode=NumberSelectorMode.SLIDER, unit_of_measurement="seconds"
+                        )
+                    ),
+                    vol.Required(
+                        CONF_MAX_DURATION, default=DEFAULT_MAX_DURATION
+                    ): NumberSelector(
+                        NumberSelectorConfig(
+                            min=60, max=1800, step=60, mode=NumberSelectorMode.SLIDER, unit_of_measurement="seconds"
                         )
                     ),
                     vol.Required(
@@ -569,6 +579,13 @@ class ReolinkHaSekurityOptionsFlow(config_entries.OptionsFlow):
                         )
                     ),
                     vol.Required(
+                        CONF_MAX_DURATION, default=DEFAULT_MAX_DURATION
+                    ): NumberSelector(
+                        NumberSelectorConfig(
+                            min=60, max=1800, step=60, mode=NumberSelectorMode.SLIDER, unit_of_measurement="seconds"
+                        )
+                    ),
+                    vol.Required(
                         CONF_LOOKBACK, default=DEFAULT_LOOKBACK
                     ): NumberSelector(
                         NumberSelectorConfig(
@@ -643,6 +660,7 @@ class ReolinkHaSekurityOptionsFlow(config_entries.OptionsFlow):
                 cfg[CONF_RECORD_SENSORS] = record_sensors
                 cfg[CONF_ALARM_SENSORS] = alarm_sensors
                 cfg[CONF_CLIP_DURATION] = user_input.get(CONF_CLIP_DURATION, DEFAULT_CLIP_DURATION)
+                cfg[CONF_MAX_DURATION] = user_input.get(CONF_MAX_DURATION, DEFAULT_MAX_DURATION)
                 cfg[CONF_LOOKBACK] = user_input.get(CONF_LOOKBACK, DEFAULT_LOOKBACK)
                 cfg[CONF_POST_ROLL] = user_input.get(CONF_POST_ROLL, DEFAULT_POST_ROLL)
                 
@@ -688,6 +706,13 @@ class ReolinkHaSekurityOptionsFlow(config_entries.OptionsFlow):
                     ): NumberSelector(
                         NumberSelectorConfig(
                             min=10, max=120, step=5, mode=NumberSelectorMode.SLIDER, unit_of_measurement="seconds"
+                        )
+                    ),
+                    vol.Required(
+                        CONF_MAX_DURATION, default=cfg.get(CONF_MAX_DURATION, DEFAULT_MAX_DURATION)
+                    ): NumberSelector(
+                        NumberSelectorConfig(
+                            min=60, max=1800, step=60, mode=NumberSelectorMode.SLIDER, unit_of_measurement="seconds"
                         )
                     ),
                     vol.Required(
