@@ -5,7 +5,7 @@
  * live feed for active events, and segment playback.
  */
 
-const CARD_VERSION = "0.1.17";
+const CARD_VERSION = "0.1.18";
 
 class ReolinkHaSekurityCard extends HTMLElement {
   constructor() {
@@ -331,23 +331,48 @@ class ReolinkHaSekurityCard extends HTMLElement {
         flex-shrink: 0;
       }
       .event-detail {
-        padding: 0 16px 12px 16px;
+        padding: 12px 16px;
         border-bottom: 1px solid var(--border);
         background: rgba(255,255,255,0.02);
       }
+      .media-grid {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+      @media (min-width: 600px) {
+        .media-grid {
+          grid-template-columns: 1fr 1fr;
+        }
+      }
+      .media-panel {
+        position: relative;
+        min-width: 0;
+      }
+      .media-panel-label {
+        font-size: 10px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        color: var(--text-secondary);
+        margin-bottom: 4px;
+      }
+      .media-panel-label.live-label {
+        color: var(--danger);
+      }
       .live-feed {
         width: 100%;
-        max-height: 250px;
         border-radius: 8px;
         background: #000;
-        margin-bottom: 8px;
+        display: block;
+        max-height: 300px;
         object-fit: contain;
       }
       .video-player {
         width: 100%;
         border-radius: 8px;
         background: #000;
-        margin-bottom: 8px;
         max-height: 300px;
       }
       .segments-bar {
@@ -582,29 +607,48 @@ class ReolinkHaSekurityCard extends HTMLElement {
 
     let html = "";
 
-    // Live feed for active events
-    if (is_active && camera_entity) {
-      html += `
-        <div class="detail-meta">🔴 LIVE — streaming from ${(metadata.camera || "").replace(/_/g, " ")}</div>
-        <ha-camera-stream id="live-${eventId}" allow-exoplayer="true" muted="true" class="live-feed"></ha-camera-stream>
-      `;
-    }
+    const hasLive = is_active && camera_entity;
+    const hasSegments = segments && segments.length > 0;
 
-    // Segment player
-    if (segments && segments.length > 0) {
-      const firstUrl = segments[0].url;
-      html += `<video class="video-player" id="player-${eventId}" controls autoplay playsinline src="${firstUrl}"></video>`;
+    // Build media panels
+    if (hasLive || hasSegments) {
+      html += `<div class="media-grid">`;
 
-      // Segment buttons
-      html += `<div class="segments-bar">`;
-      segments.forEach((seg, i) => {
-        html += `<button class="seg-btn ${i === 0 ? "active" : ""}" data-seg-index="${i}" data-seg-url="${seg.url}">▶ ${i + 1}</button>`;
-      });
-
-      // Show writing indicator for active events
-      if (is_active) {
-        html += `<button class="seg-btn writing" disabled>⏳ recording...</button>`;
+      // Live feed panel
+      if (hasLive) {
+        html += `
+          <div class="media-panel">
+            <div class="media-panel-label live-label">🔴 Live — ${(metadata.camera || "").replace(/_/g, " ")}</div>
+            <ha-camera-stream id="live-${eventId}" allow-exoplayer="true" muted="true" class="live-feed"></ha-camera-stream>
+          </div>
+        `;
       }
+
+      // Recorded segments panel
+      if (hasSegments) {
+        const firstUrl = segments[0].url;
+        html += `
+          <div class="media-panel">
+            <div class="media-panel-label">▶ Recorded Segments</div>
+            <video class="video-player" id="player-${eventId}" controls autoplay playsinline src="${firstUrl}"></video>
+            <div class="segments-bar">`;
+        segments.forEach((seg, i) => {
+          html += `<button class="seg-btn ${i === 0 ? "active" : ""}" data-seg-index="${i}" data-seg-url="${seg.url}">▶ ${i + 1}</button>`;
+        });
+        if (is_active) {
+          html += `<button class="seg-btn writing" disabled>⏳ recording...</button>`;
+        }
+        html += `</div></div>`;
+      } else if (hasLive) {
+        // Active event but no segments yet — show placeholder
+        html += `
+          <div class="media-panel">
+            <div class="media-panel-label">▶ Recorded Segments</div>
+            <div class="empty-state">Recording in progress…</div>
+          </div>
+        `;
+      }
+
       html += `</div>`;
     } else if (!is_active) {
       html += `<div class="empty-state">No segments available</div>`;
