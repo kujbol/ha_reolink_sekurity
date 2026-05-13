@@ -23,6 +23,7 @@ from .const import (
     CONF_LIGHT_ENTITIES,
     CONF_LIGHT_TIMEOUT,
     CONF_LOOKBACK,
+    CONF_MAX_DURATION,
     CONF_MEDIA_PATH,
     CONF_NIGHT_END,
     CONF_NIGHT_START,
@@ -34,6 +35,7 @@ from .const import (
     DEFAULT_CLIP_DURATION,
     DEFAULT_LIGHT_TIMEOUT,
     DEFAULT_LOOKBACK,
+    DEFAULT_MAX_DURATION,
     DEFAULT_MEDIA_PATH,
     DEFAULT_MERGE_WINDOW,
     DEFAULT_NIGHT_END,
@@ -274,15 +276,24 @@ class ReolinkHaSekurityCoordinator:
         new_state = event.data.get("new_state")
         old_state = event.data.get("old_state")
 
-        _LOGGER.warning(
-            "[SEKURITY] Sensor change: %s -> %s (was: %s)",
-            entity_id,
-            new_state.state if new_state else None,
-            old_state.state if old_state else None,
-        )
-
         if new_state is None:
             return
+
+        new_val = new_state.state
+        old_val = old_state.state if old_state else None
+
+        # Ignore unavailable/unknown transitions unless a recording is active
+        if new_val in ("unavailable", "unknown") and old_val not in ("on", "detected"):
+            _LOGGER.debug(
+                "[SEKURITY] Ignoring %s -> %s for %s (not actionable)",
+                old_val, new_val, entity_id,
+            )
+            return
+
+        _LOGGER.debug(
+            "[SEKURITY] Sensor change: %s -> %s (was: %s)",
+            entity_id, new_val, old_val,
+        )
 
         camera_name = self._sensor_to_camera.get(entity_id)
         if camera_name is None:
@@ -293,12 +304,10 @@ class ReolinkHaSekurityCoordinator:
         if cam_cfg is None:
             return
 
-        state_value = new_state.state
-
-        if state_value in ("on", "detected"):
+        if new_val in ("on", "detected"):
             _LOGGER.warning("[SEKURITY] DETECTION: %s on %s", entity_id, camera_name)
             await self._handle_sensor_on(entity_id, camera_name, cam_cfg)
-        elif state_value in ("off", "clear", "unavailable", "unknown") and old_state and old_state.state in ("on", "detected"):
+        elif new_val in ("off", "clear", "unavailable", "unknown") and old_val in ("on", "detected"):
             await self._handle_sensor_off(entity_id, camera_name)
 
     async def _handle_sensor_on(
