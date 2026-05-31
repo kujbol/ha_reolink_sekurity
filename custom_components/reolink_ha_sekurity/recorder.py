@@ -203,7 +203,7 @@ class EventRecorder:
             _LOGGER.exception("Failed to take snapshot for %s", self.event_id)
             return None
 
-    async def _record_segment(self) -> str | None:
+    async def _record_segment(self, is_retry: bool = False) -> str | None:
         """Record a single segment. Returns the segment filename or None on failure."""
         self._segment_index += 1
         segment_filename = f"{self.event_id}_seg{self._segment_index:03d}.mp4"
@@ -213,6 +213,10 @@ class EventRecorder:
         current_lookback = (
             self.lookback if self._segment_index == 1 else DEFAULT_SEGMENT_OVERLAP
         )
+
+        if is_retry:
+            _LOGGER.debug("Retrying segment %d without lookback", self._segment_index)
+            current_lookback = 0
 
         # Track timing to detect when camera.record returns too fast (stream failure)
         segment_start = datetime.now(timezone.utc)
@@ -225,15 +229,18 @@ class EventRecorder:
                 self.clip_duration,
                 current_lookback,
             )
+            service_data = {
+                "entity_id": self.camera_entity,
+                "filename": str(segment_path),
+                "duration": self.clip_duration,
+            }
+            if current_lookback > 0:
+                service_data["lookback"] = current_lookback
+
             await self.hass.services.async_call(
                 "camera",
                 "record",
-                {
-                    "entity_id": self.camera_entity,
-                    "filename": str(segment_path),
-                    "duration": self.clip_duration,
-                    "lookback": current_lookback,
-                },
+                service_data,
                 blocking=True,
             )
 
@@ -314,7 +321,7 @@ class EventRecorder:
             # Segment loop
             consecutive_failures = 0
             while self._should_continue():
-                result = await self._record_segment()
+                result = await self._record_segment(is_retry=(consecutive_failures > 0))
                 if result is None:
                     consecutive_failures += 1
                     if consecutive_failures >= 3:
