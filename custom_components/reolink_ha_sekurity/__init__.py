@@ -48,6 +48,7 @@ from .const import (
 )
 from .lights import LightController
 from .metadata import (
+    MediaPathUnavailable,
     append_to_events_index,
     ensure_camera_dirs,
     load_all_events,
@@ -56,9 +57,11 @@ from .metadata import (
     save_event_metadata,
     get_event_dir,
     get_media_base_path,
+    verify_media_path,
 )
 from .notifications import send_error_notification, send_event_notification
 from .recorder import EventRecorder
+from .stream_keeper import StreamKeeper
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -182,7 +185,9 @@ class ReolinkHaSekurityCoordinator:
         self.active_events: dict[str, EventRecorder] = {}  # camera_name → recorder
         self._unsub_listeners: list[callback] = []
         self._light_controller: LightController | None = None
+        self._stream_keeper: StreamKeeper | None = None
         self._sensor_to_camera: dict[str, str] = {}  # sensor_entity → camera_name
+        self._nas_error_notified: bool = False  # Prevents notification spam when NAS is down
 
     @property
     def media_path(self) -> str:
@@ -263,10 +268,36 @@ class ReolinkHaSekurityCoordinator:
             len(all_sensors),
         )
 
+        # 6. Start StreamKeeper — keeps RTSP streams alive 24/7
+        camera_entities = [
+            cam_cfg[CONF_CAMERA_ENTITY]
+            for cam_cfg in self.cameras.values()
+            if CONF_CAMERA_ENTITY in cam_cfg
+        ]
+        if camera_entities:
+            self._stream_keeper = StreamKeeper(self.hass)
+            # Delay stream start slightly to let camera entities finish loading
+            async def _start_streams(*_args):
+                await self._stream_keeper.async_start(camera_entities)
+
+            from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
+            from homeassistant.core import CoreState
+
+            if self.hass.state == CoreState.running:
+                self.hass.async_create_task(_start_streams())
+            else:
+                self.hass.bus.async_listen_once(
+                    EVENT_HOMEASSISTANT_STARTED, _start_streams
+                )
+
     def _create_media_dirs(self) -> None:
         """Create camera directories on the NAS."""
-        for camera_name in self.cameras:
-            ensure_camera_dirs(self.media_path, camera_name)
+        try:
+            for camera_name in self.cameras:
+                ensure_camera_dirs(self.media_path, camera_name)
+            self._nas_error_notified = False  # NAS is back — reset flag
+        except MediaPathUnavailable as exc:
+            _LOGGER.error("[SEKURITY] NAS media path unavailable: %s", exc)
 
     async def _on_sensor_change(self, event: Event) -> None:
         """Handle binary sensor state changes."""
@@ -324,6 +355,37 @@ class ReolinkHaSekurityCoordinator:
             )
             return
 
+        # Verify NAS is available before starting a new recording
+        try:
+            await self.hass.async_add_executor_job(
+                verify_media_path, self.media_path
+            )
+        except MediaPathUnavailable as exc:
+            _LOGGER.error(
+                "[SEKURITY] Cannot start recording for %s — NAS unavailable: %s",
+                camera_name,
+                exc,
+            )
+            if not self._nas_error_notified and self.notify_targets:
+                self._nas_error_notified = True
+                await send_error_notification(
+                    self.hass,
+                    self.notify_targets,
+                    camera_name,
+                    f"NAS media storage is unavailable. Recordings are NOT being saved. "
+                    f"Check Settings → System → Storage.",
+                )
+            return
+
+        # NAS is reachable — clear the error flag
+        self._nas_error_notified = False
+
+        # Ensure camera stream is warm before recording
+        if self._stream_keeper:
+            await self._stream_keeper.ensure_stream_ready(
+                cam_cfg[CONF_CAMERA_ENTITY]
+            )
+
         # Start a new event
         event_type = EventRecorder._detect_event_type(self.hass, entity_id)
         _LOGGER.info(
@@ -344,6 +406,7 @@ class ReolinkHaSekurityCoordinator:
             max_duration=cam_cfg.get(CONF_MAX_DURATION, DEFAULT_MAX_DURATION),
             lookback=cam_cfg.get(CONF_LOOKBACK, DEFAULT_LOOKBACK),
             post_roll=cam_cfg.get(CONF_POST_ROLL, DEFAULT_POST_ROLL),
+            stream_keeper=self._stream_keeper,
         )
         self.active_events[camera_name] = recorder
 
@@ -409,12 +472,28 @@ class ReolinkHaSekurityCoordinator:
         """Run the recorder and clean up when done."""
         try:
             await recorder.run()
+        except MediaPathUnavailable as exc:
+            _LOGGER.error(
+                "Recording failed for %s — NAS unavailable: %s",
+                camera_name,
+                exc,
+            )
+            if not self._nas_error_notified and self.notify_targets:
+                self._nas_error_notified = True
+                await send_error_notification(
+                    self.hass,
+                    self.notify_targets,
+                    camera_name,
+                    f"NAS media storage became unavailable during recording. "
+                    f"Check Settings → System → Storage.",
+                )
         except Exception:
             _LOGGER.exception(
-                "Recording failed for %s — sending error notification",
+                "Recording failed for %s",
                 camera_name,
             )
-            if self.notify_targets:
+            if not self._nas_error_notified and self.notify_targets:
+                self._nas_error_notified = True
                 await send_error_notification(
                     self.hass,
                     self.notify_targets,
@@ -436,6 +515,10 @@ class ReolinkHaSekurityCoordinator:
         for recorder in self.active_events.values():
             recorder.stop()
         self.active_events.clear()
+
+        # Stop stream keeper
+        if self._stream_keeper:
+            self._stream_keeper.stop()
 
         # Cancel light timer
         if self._light_controller:

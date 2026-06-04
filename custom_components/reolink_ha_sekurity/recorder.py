@@ -6,8 +6,12 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from homeassistant.core import HomeAssistant
+
+if TYPE_CHECKING:
+    from .stream_keeper import StreamKeeper
 
 from .const import (
     DEFAULT_CLIP_DURATION,
@@ -47,6 +51,7 @@ class EventRecorder:
         lookback: int = DEFAULT_LOOKBACK,
         post_roll: int = DEFAULT_POST_ROLL,
         merge_window: int = DEFAULT_MERGE_WINDOW,
+        stream_keeper: StreamKeeper | None = None,
     ):
         self.hass = hass
         self.camera_entity = camera_entity
@@ -57,6 +62,7 @@ class EventRecorder:
         self.lookback = lookback
         self.post_roll = post_roll
         self.merge_window = merge_window
+        self._stream_keeper = stream_keeper
 
         # Event state
         self.event_id = generate_event_id(camera_name)
@@ -334,15 +340,34 @@ class EventRecorder:
                             "3 consecutive recording failures",
                         )
                         break
-                    # Back off with increasing delay to avoid hammering a failing camera
-                    retry_delay = min(5 * (2 ** (consecutive_failures - 1)), 30)
-                    _LOGGER.warning(
-                        "Recording attempt %d failed for %s — retrying in %ds",
-                        consecutive_failures,
-                        self.event_id,
-                        retry_delay,
-                    )
-                    await asyncio.sleep(retry_delay)
+
+                    # Try to re-warm the stream before retrying
+                    if self._stream_keeper:
+                        _LOGGER.info(
+                            "Re-warming stream for %s before retry %d",
+                            self.camera_entity,
+                            consecutive_failures + 1,
+                        )
+                        await self._stream_keeper.ensure_stream_ready(
+                            self.camera_entity
+                        )
+
+                    # First retry: immediate (stream was just re-warmed)
+                    # Subsequent retries: back off to avoid hammering
+                    if consecutive_failures > 1:
+                        retry_delay = min(5 * (2 ** (consecutive_failures - 2)), 15)
+                        _LOGGER.warning(
+                            "Recording attempt %d failed for %s — retrying in %ds",
+                            consecutive_failures,
+                            self.event_id,
+                            retry_delay,
+                        )
+                        await asyncio.sleep(retry_delay)
+                    else:
+                        _LOGGER.warning(
+                            "Recording attempt 1 failed for %s — retrying immediately",
+                            self.event_id,
+                        )
                 else:
                     consecutive_failures = 0
 

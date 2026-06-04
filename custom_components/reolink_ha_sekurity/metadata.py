@@ -14,6 +14,10 @@ from .const import EVENTS_INDEX_FILE, EVENT_METADATA_FILE, MAX_EVENTS_INDEX
 _LOGGER = logging.getLogger(__name__)
 
 
+class MediaPathUnavailable(Exception):
+    """Raised when the media base path (NAS mount) is not available."""
+
+
 def _ensure_dir(path: Path) -> None:
     """Create directory if it doesn't exist."""
     path.mkdir(parents=True, exist_ok=True)
@@ -50,6 +54,24 @@ def get_media_base_path(media_path: str) -> Path:
     return Path("/media") / media_path
 
 
+def verify_media_path(media_path: str) -> None:
+    """Verify the media base path (NAS mount) exists.
+
+    The first component of media_path is the mount name (e.g. 'camera_on_nas').
+    We check that /media/<mount_name> exists — if it doesn't, the NAS is
+    unmounted and we must NOT create local directories.
+
+    Raises MediaPathUnavailable if the mount is not present.
+    """
+    mount_name = media_path.split("/")[0]
+    mount_point = Path("/media") / mount_name
+    if not mount_point.exists():
+        raise MediaPathUnavailable(
+            f"Media mount '/media/{mount_name}' does not exist. "
+            f"Is the NAS mounted? Check Settings → System → Storage."
+        )
+
+
 def get_camera_dir(media_path: str, camera_name: str) -> Path:
     """Get the directory for a camera's data."""
     return get_media_base_path(media_path) / camera_name
@@ -61,13 +83,21 @@ def get_event_dir(media_path: str, camera_name: str, event_id: str) -> Path:
 
 
 def ensure_camera_dirs(media_path: str, camera_name: str) -> None:
-    """Create the camera directory structure on the NAS."""
+    """Create the camera directory structure on the NAS.
+
+    Raises MediaPathUnavailable if the NAS mount is not present.
+    """
+    verify_media_path(media_path)
     camera_dir = get_camera_dir(media_path, camera_name)
     _ensure_dir(camera_dir)
 
 
 def ensure_event_dir(media_path: str, camera_name: str, event_id: str) -> Path:
-    """Create and return the event directory."""
+    """Create and return the event directory.
+
+    Raises MediaPathUnavailable if the NAS mount is not present.
+    """
+    verify_media_path(media_path)
     event_dir = get_event_dir(media_path, camera_name, event_id)
     _ensure_dir(event_dir)
     return event_dir
