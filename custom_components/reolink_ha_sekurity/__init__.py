@@ -79,12 +79,10 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
             StaticPathConfig(
                 url_path="/reolink_ha_sekurity",
                 path=str(frontend_path),
-                cache_headers=False,
+                cache_headers=True,
             )
         ]
     )
-    hass.data.setdefault("frontend_extra_module_url", set())
-    hass.data["frontend_extra_module_url"].add(FRONTEND_SCRIPT_URL)
 
     return True
 

@@ -5,7 +5,7 @@
  * live feed for active events, and segment playback.
  */
 
-const CARD_VERSION = "0.1.20";
+const CARD_VERSION = "0.1.21";
 
 class ReolinkHaSekurityCard extends HTMLElement {
   constructor() {
@@ -722,7 +722,9 @@ class ReolinkHaSekurityCard extends HTMLElement {
   }
 }
 
-customElements.define("reolink-ha-sekurity-card", ReolinkHaSekurityCard);
+if (!customElements.get("reolink-ha-sekurity-card")) {
+  customElements.define("reolink-ha-sekurity-card", ReolinkHaSekurityCard);
+}
 
 window.customCards = window.customCards || [];
 window.customCards.push({
