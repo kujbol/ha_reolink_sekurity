@@ -181,7 +181,57 @@ class EventRecorder:
         return False
 
     async def take_snapshot(self) -> str | None:
-        """Take a camera snapshot for the event thumbnail."""
+        """Take a camera snapshot for the event thumbnail.
+
+        Retries a few times because Reolink cameras often can't serve a
+        snapshot while the RTSP stream is starting up for recording.
+        """
+        if self.event_dir is None:
+            return None
+
+        snapshot_filename = "snapshot.jpg"
+        snapshot_path = self.event_dir / snapshot_filename
+
+        from homeassistant.components.camera import async_get_image
+
+        max_attempts = 3
+        for attempt in range(1, max_attempts + 1):
+            try:
+                image = await async_get_image(self.hass, self.camera_entity)
+                if image and image.content:
+                    def write_image():
+                        with open(snapshot_path, "wb") as f:
+                            f.write(image.content)
+
+                    await self.hass.async_add_executor_job(write_image)
+
+                    self.event_data["snapshot"] = snapshot_filename
+                    _LOGGER.debug("Snapshot saved on attempt %d: %s", attempt, snapshot_path)
+                    return snapshot_filename
+            except Exception:
+                if attempt < max_attempts:
+                    _LOGGER.debug(
+                        "Snapshot attempt %d/%d failed for %s — retrying in 2s",
+                        attempt,
+                        max_attempts,
+                        self.event_id,
+                    )
+                    await asyncio.sleep(2)
+                else:
+                    _LOGGER.debug(
+                        "All %d snapshot attempts failed for %s — "
+                        "will try to extract from first segment",
+                        max_attempts,
+                        self.event_id,
+                    )
+
+        return None
+
+    async def _extract_thumbnail_from_segment(self, segment_path: Path) -> str | None:
+        """Extract a thumbnail frame from a recorded mp4 segment using ffmpeg.
+
+        Used as a fallback when camera snapshot is unavailable.
+        """
         if self.event_dir is None:
             return None
 
@@ -189,24 +239,42 @@ class EventRecorder:
         snapshot_path = self.event_dir / snapshot_filename
 
         try:
-            from homeassistant.components.camera import async_get_image
-            
-            image = await async_get_image(self.hass, self.camera_entity)
-            if image and image.content:
-                def write_image():
-                    with open(snapshot_path, "wb") as f:
-                        f.write(image.content)
-                        
-                await self.hass.async_add_executor_job(write_image)
-                
+            # Extract a frame from 1 second into the video
+            proc = await asyncio.create_subprocess_exec(
+                "ffmpeg",
+                "-ss", "1",
+                "-i", str(segment_path),
+                "-frames:v", "1",
+                "-q:v", "2",
+                "-y",
+                str(snapshot_path),
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await asyncio.wait_for(proc.wait(), timeout=10)
+
+            if proc.returncode == 0 and snapshot_path.exists() and snapshot_path.stat().st_size > 0:
                 self.event_data["snapshot"] = snapshot_filename
-                _LOGGER.debug("Snapshot saved: %s", snapshot_path)
+                _LOGGER.info(
+                    "Thumbnail extracted from segment for %s", self.event_id
+                )
                 return snapshot_filename
-            else:
-                _LOGGER.warning("Failed to get image content from %s", self.camera_entity)
-                return None
+
+            _LOGGER.warning(
+                "ffmpeg thumbnail extraction failed (rc=%s) for %s",
+                proc.returncode,
+                self.event_id,
+            )
+            return None
+
+        except FileNotFoundError:
+            _LOGGER.debug("ffmpeg not available — skipping thumbnail extraction")
+            return None
+        except asyncio.TimeoutError:
+            _LOGGER.warning("ffmpeg thumbnail extraction timed out for %s", self.event_id)
+            return None
         except Exception:
-            _LOGGER.exception("Failed to take snapshot for %s", self.event_id)
+            _LOGGER.exception("Thumbnail extraction error for %s", self.event_id)
             return None
 
     async def _record_segment(self, is_retry: bool = False) -> str | None:
@@ -370,6 +438,30 @@ class EventRecorder:
                         )
                 else:
                     consecutive_failures = 0
+
+                    # After first successful segment, extract thumbnail if
+                    # the camera snapshot failed earlier
+                    if (
+                        self._segment_index == 1
+                        and self.event_data.get("snapshot") is None
+                        and self.event_dir is not None
+                    ):
+                        segment_path = self.event_dir / result
+                        thumbnail = await self._extract_thumbnail_from_segment(
+                            segment_path
+                        )
+                        if thumbnail:
+                            # Update metadata & index with new snapshot
+                            await self.hass.async_add_executor_job(
+                                save_event_metadata,
+                                self.media_path, self.camera_name,
+                                self.event_id, self.event_data,
+                            )
+                            await self.hass.async_add_executor_job(
+                                append_to_events_index,
+                                self.media_path, self.camera_name,
+                                self.event_data,
+                            )
 
             # Finalize event
             if self.event_data["status"] != "error":
