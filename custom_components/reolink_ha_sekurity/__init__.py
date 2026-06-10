@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -10,7 +11,10 @@ from homeassistant.components.http import HomeAssistantView
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_STATE_CHANGED
 from homeassistant.core import Event, HomeAssistant, callback
-from homeassistant.helpers.event import async_track_state_change_event
+from homeassistant.helpers.event import (
+    async_track_state_change_event,
+    async_track_time_interval,
+)
 from homeassistant.helpers.typing import ConfigType
 
 from .alarm import should_activate_lights, should_notify
@@ -188,6 +192,10 @@ class ReolinkHaSekurityCoordinator:
         self._stream_keeper: StreamKeeper | None = None
         self._sensor_to_camera: dict[str, str] = {}  # sensor_entity → camera_name
         self._nas_error_notified: bool = False  # Prevents notification spam when NAS is down
+        self._cancel_health_check: callback | None = None  # Periodic stuck-recorder check
+
+        # Grace period beyond max_duration before force-killing a recorder
+        self.STUCK_RECORDER_GRACE = 60  # seconds
 
     @property
     def media_path(self) -> str:
@@ -268,7 +276,15 @@ class ReolinkHaSekurityCoordinator:
             len(all_sensors),
         )
 
-        # 6. Start StreamKeeper — keeps RTSP streams alive 24/7
+        # 6. Start periodic health check for stuck recorders (every 5 min)
+        self._cancel_health_check = async_track_time_interval(
+            self.hass,
+            self._periodic_health_check,
+            timedelta(minutes=5),
+        )
+        _LOGGER.info("[SEKURITY] Stuck-recorder health check scheduled (every 5 min)")
+
+        # 7. Start StreamKeeper — keeps RTSP streams alive 24/7
         camera_entities = [
             cam_cfg[CONF_CAMERA_ENTITY]
             for cam_cfg in self.cameras.values()
@@ -344,16 +360,33 @@ class ReolinkHaSekurityCoordinator:
     ) -> None:
         """Handle a detection sensor turning ON."""
         if camera_name in self.active_events:
-            # Event already recording — upgrade type if needed and reset merge
             recorder = self.active_events[camera_name]
-            recorder.upgrade_event_type(entity_id)
-            recorder.sensor_on_again()
-            _LOGGER.debug(
-                "Sensor %s re-fired during active event %s",
-                entity_id,
-                recorder.event_id,
-            )
-            return
+
+            # Check if the existing recorder is stuck
+            if recorder.is_stuck(self.STUCK_RECORDER_GRACE):
+                _LOGGER.error(
+                    "[SEKURITY] STUCK RECORDER detected for %s: "
+                    "event=%s has been running for %.0fs "
+                    "(max_duration=%ds + grace=%ds). Force-stopping.",
+                    camera_name, recorder.event_id,
+                    recorder.elapsed_seconds(),
+                    recorder.max_duration, self.STUCK_RECORDER_GRACE,
+                )
+                recorder.stop()
+                self.active_events.pop(camera_name, None)
+                # Fall through to start a new recording
+            else:
+                # Event already recording — upgrade type if needed and reset merge
+                recorder.upgrade_event_type(entity_id)
+                recorder.sensor_on_again()
+                _LOGGER.info(
+                    "[SEKURITY] Sensor %s re-fired during active event %s "
+                    "(elapsed=%.0fs, segments=%d)",
+                    entity_id, recorder.event_id,
+                    recorder.elapsed_seconds(),
+                    len(recorder.event_data.get("segments", [])),
+                )
+                return
 
         # Verify NAS is available before starting a new recording
         try:
@@ -409,6 +442,12 @@ class ReolinkHaSekurityCoordinator:
             stream_keeper=self._stream_keeper,
         )
         self.active_events[camera_name] = recorder
+
+        _LOGGER.info(
+            "[SEKURITY] Launching recording task for %s "
+            "(event=%s, active_cameras=%d)",
+            camera_name, recorder.event_id, len(self.active_events),
+        )
 
         # Launch recording as background task (must not block HA startup)
         recorder.task = self.hass.async_create_background_task(
@@ -474,9 +513,8 @@ class ReolinkHaSekurityCoordinator:
             await recorder.run()
         except MediaPathUnavailable as exc:
             _LOGGER.error(
-                "Recording failed for %s — NAS unavailable: %s",
-                camera_name,
-                exc,
+                "[SEKURITY] Recording failed for %s — NAS unavailable: %s",
+                camera_name, exc,
             )
             if not self._nas_error_notified and self.notify_targets:
                 self._nas_error_notified = True
@@ -489,8 +527,8 @@ class ReolinkHaSekurityCoordinator:
                 )
         except Exception:
             _LOGGER.exception(
-                "Recording failed for %s",
-                camera_name,
+                "[SEKURITY] Recording FAILED for %s (event=%s)",
+                camera_name, recorder.event_id,
             )
             if not self._nas_error_notified and self.notify_targets:
                 self._nas_error_notified = True
@@ -502,17 +540,74 @@ class ReolinkHaSekurityCoordinator:
                 )
         finally:
             self.active_events.pop(camera_name, None)
-            _LOGGER.debug("Cleaned up event for %s", camera_name)
+            _LOGGER.info(
+                "[SEKURITY] Cleaned up event for %s "
+                "(remaining active: %d cameras: %s)",
+                camera_name, len(self.active_events),
+                list(self.active_events.keys()),
+            )
+
+    async def _periodic_health_check(self, now=None) -> None:
+        """Periodically check for stuck recorders and force-stop them."""
+        if not self.active_events:
+            return
+
+        _LOGGER.debug(
+            "[SEKURITY] Health check: %d active events: %s",
+            len(self.active_events),
+            {name: f"{rec.event_id} ({rec.elapsed_seconds():.0f}s)"
+             for name, rec in self.active_events.items()},
+        )
+
+        stuck_cameras = []
+        for camera_name, recorder in list(self.active_events.items()):
+            if recorder.is_stuck(self.STUCK_RECORDER_GRACE):
+                stuck_cameras.append((camera_name, recorder))
+
+        for camera_name, recorder in stuck_cameras:
+            _LOGGER.error(
+                "[SEKURITY] HEALTH CHECK: Force-stopping stuck recorder "
+                "for %s: event=%s, elapsed=%.0fs, max_duration=%ds, "
+                "segments=%d, entity=%s",
+                camera_name, recorder.event_id,
+                recorder.elapsed_seconds(), recorder.max_duration,
+                len(recorder.event_data.get("segments", [])),
+                recorder.camera_entity,
+            )
+            recorder.stop()
+            self.active_events.pop(camera_name, None)
+
+            # Notify if configured
+            if self.notify_targets:
+                await send_error_notification(
+                    self.hass,
+                    self.notify_targets,
+                    camera_name,
+                    f"Stuck recording detected and cleaned up for {camera_name}. "
+                    f"Event {recorder.event_id} was running for "
+                    f"{recorder.elapsed_seconds()/60:.0f} minutes.",
+                )
 
     async def async_teardown(self) -> None:
         """Clean up on unload."""
+        _LOGGER.info(
+            "[SEKURITY] Tearing down: %d active events, %d listeners",
+            len(self.active_events), len(self._unsub_listeners),
+        )
+
+        # Cancel periodic health check
+        if self._cancel_health_check:
+            self._cancel_health_check()
+            self._cancel_health_check = None
+
         # Cancel all state listeners
         for unsub in self._unsub_listeners:
             unsub()
         self._unsub_listeners.clear()
 
         # Stop all active recordings
-        for recorder in self.active_events.values():
+        for name, recorder in self.active_events.items():
+            _LOGGER.info("[SEKURITY] Stopping active recorder: %s", name)
             recorder.stop()
         self.active_events.clear()
 

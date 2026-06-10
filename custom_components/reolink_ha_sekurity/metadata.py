@@ -125,6 +125,7 @@ def create_event_metadata(
         "camera_entity": camera_entity,
         "trigger_entity": trigger_entity,
         "event_type": event_type,
+        "lookback": lookback,
         "started_at": now.isoformat(),
         "ended_at": None,
         "status": "in_progress",

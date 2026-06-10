@@ -5,7 +5,7 @@
  * live feed for active events, and segment playback.
  */
 
-const CARD_VERSION = "0.1.23";
+const CARD_VERSION = "0.2.0";
 
 class ReolinkHaSekurityCard extends HTMLElement {
   constructor() {
@@ -369,36 +369,75 @@ class ReolinkHaSekurityCard extends HTMLElement {
         max-height: 300px;
         object-fit: contain;
       }
-      .video-player {
+      .video-player-container {
+        position: relative;
         width: 100%;
         border-radius: 8px;
+        overflow: hidden;
         background: #000;
         max-height: 300px;
       }
-      .segments-bar {
-        display: flex;
-        gap: 4px;
-        flex-wrap: wrap;
-        margin-bottom: 8px;
+      .video-player-container video {
+        width: 100%;
+        display: block;
+        max-height: 300px;
+        background: #000;
       }
-      .seg-btn {
-        padding: 2px 8px;
-        border-radius: 8px;
-        border: 1px solid var(--border);
-        background: transparent;
-        color: var(--text-secondary);
-        font-size: 11px;
+      .video-player-container video.hidden-preload {
+        position: absolute;
+        top: 0; left: 0;
+        width: 100%; height: 100%;
+        opacity: 0;
+        pointer-events: none;
+        z-index: 0;
+      }
+      .video-player-container video.active-player {
+        position: relative;
+        z-index: 1;
+      }
+      .timeline-bar {
+        position: relative;
+        width: 100%;
+        height: 20px;
+        background: rgba(255,255,255,0.08);
+        border-radius: 10px;
+        margin: 8px 0;
         cursor: pointer;
-        transition: all 0.15s;
+        overflow: hidden;
       }
-      .seg-btn.active {
+      .timeline-progress {
+        height: 100%;
         background: var(--accent);
-        border-color: var(--accent);
-        color: white;
+        border-radius: 10px;
+        transition: width 0.3s linear;
+        min-width: 2px;
       }
-      .seg-btn.writing {
-        border-color: var(--warning);
-        color: var(--warning);
+      .timeline-tick {
+        position: absolute;
+        top: 0;
+        width: 1px;
+        height: 100%;
+        background: rgba(255,255,255,0.15);
+      }
+      .timeline-info {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 10px;
+        color: var(--text-secondary);
+        padding: 0 2px;
+      }
+      .timeline-info .segment-indicator {
+        opacity: 0.6;
+      }
+      .recording-pulse {
+        display: inline-block;
+        width: 6px; height: 6px;
+        border-radius: 50%;
+        background: var(--warning);
+        animation: pulse 2s infinite;
+        margin-left: 4px;
+        vertical-align: middle;
       }
       .load-more {
         display: block;
@@ -624,26 +663,41 @@ class ReolinkHaSekurityCard extends HTMLElement {
         `;
       }
 
-      // Recorded segments panel
+      // Recorded segments panel — seamless player
       if (hasSegments) {
-        const firstUrl = segments[0].url;
+        const totalDuration = segments.reduce((sum, s) => sum + (s.duration || 30), 0);
+        // Build timeline ticks for segment boundaries
+        let ticksHtml = '';
+        let accum = 0;
+        for (let i = 1; i < segments.length; i++) {
+          accum += segments[i - 1].duration || 30;
+          const pct = (accum / totalDuration) * 100;
+          ticksHtml += `<div class="timeline-tick" style="left:${pct}%"></div>`;
+        }
+
         html += `
           <div class="media-panel">
-            <div class="media-panel-label">▶ Recorded Segments</div>
-            <video class="video-player" id="player-${eventId}" controls autoplay playsinline src="${firstUrl}"></video>
-            <div class="segments-bar">`;
-        segments.forEach((seg, i) => {
-          html += `<button class="seg-btn ${i === 0 ? "active" : ""}" data-seg-index="${i}" data-seg-url="${seg.url}">▶ ${i + 1}</button>`;
-        });
-        if (is_active) {
-          html += `<button class="seg-btn writing" disabled>⏳ recording...</button>`;
-        }
-        html += `</div></div>`;
+            <div class="media-panel-label">▶ Recording${is_active ? ' <span class="recording-pulse"></span>' : ''}</div>
+            <div class="video-player-container" id="vpc-${eventId}">
+              <video class="active-player" id="player-${eventId}" controls autoplay playsinline src="${segments[0].url}"></video>
+              <video class="hidden-preload" id="preload-${eventId}" preload="auto" playsinline></video>
+            </div>
+            <div class="timeline-bar" id="timeline-${eventId}">
+              ${ticksHtml}
+              <div class="timeline-progress" id="progress-${eventId}" style="width:0%"></div>
+            </div>
+            <div class="timeline-info">
+              <span id="time-current-${eventId}">0:00</span>
+              <span class="segment-indicator" id="seg-info-${eventId}">Segment 1/${segments.length}</span>
+              <span id="time-total-${eventId}">${Math.floor(totalDuration / 60)}:${String(Math.floor(totalDuration % 60)).padStart(2, '0')}</span>
+            </div>
+          </div>
+        `;
       } else if (hasLive) {
         // Active event but no segments yet — show placeholder
         html += `
           <div class="media-panel">
-            <div class="media-panel-label">▶ Recorded Segments</div>
+            <div class="media-panel-label">▶ Recording</div>
             <div class="empty-state">Recording in progress…</div>
           </div>
         `;
@@ -673,47 +727,120 @@ class ReolinkHaSekurityCard extends HTMLElement {
       streamEl.stateObj = this._hass.states[camera_entity];
     }
 
-    // Wire up segment buttons
-    container.querySelectorAll(".seg-btn[data-seg-url]").forEach((btn) => {
-      btn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const player = container.querySelector(`#player-${eventId}`);
-        if (player) {
-          player.src = btn.dataset.segUrl;
-          player.play();
-        }
-        container.querySelectorAll(".seg-btn").forEach((b) => b.classList.remove("active"));
-        btn.classList.add("active");
-      });
-    });
-
-    // Auto-advance segments
+    // Wire up seamless segment playback with preloading
     const player = container.querySelector(`#player-${eventId}`);
-    if (player && segments) {
+    const preloadEl = container.querySelector(`#preload-${eventId}`);
+    const progressBar = container.querySelector(`#progress-${eventId}`);
+    const timeCurrentEl = container.querySelector(`#time-current-${eventId}`);
+    const segInfoEl = container.querySelector(`#seg-info-${eventId}`);
+    const timelineBar = container.querySelector(`#timeline-${eventId}`);
+
+    if (player && segments && segments.length > 0) {
       let currentSeg = 0;
-      player.addEventListener("ended", () => {
+      const totalDuration = segments.reduce((sum, s) => sum + (s.duration || 30), 0);
+
+      // Calculate cumulative start times for each segment
+      const segStartTimes = [0];
+      for (let i = 1; i < segments.length; i++) {
+        segStartTimes.push(segStartTimes[i - 1] + (segments[i - 1].duration || 30));
+      }
+
+      // Preload next segment
+      const preloadNext = () => {
+        if (preloadEl && currentSeg + 1 < segments.length) {
+          preloadEl.src = segments[currentSeg + 1].url;
+          preloadEl.load();
+        }
+      };
+
+      // Format time as M:SS
+      const fmtTime = (sec) => {
+        const m = Math.floor(sec / 60);
+        const s = Math.floor(sec % 60);
+        return `${m}:${String(s).padStart(2, '0')}`;
+      };
+
+      // Update timeline progress
+      const updateProgress = () => {
+        if (!player || player.paused && player.ended) return;
+        const segOffset = segStartTimes[currentSeg] || 0;
+        const globalTime = segOffset + (player.currentTime || 0);
+        const pct = Math.min((globalTime / totalDuration) * 100, 100);
+        if (progressBar) progressBar.style.width = `${pct}%`;
+        if (timeCurrentEl) timeCurrentEl.textContent = fmtTime(globalTime);
+        if (segInfoEl) segInfoEl.textContent = `Segment ${currentSeg + 1}/${segments.length}`;
+      };
+
+      player.addEventListener('timeupdate', updateProgress);
+      player.addEventListener('loadeddata', () => {
+        preloadNext();
+        updateProgress();
+      });
+
+      // Preload first next segment
+      preloadNext();
+
+      // Gapless segment transition
+      player.addEventListener('ended', () => {
         currentSeg++;
         if (currentSeg < segments.length) {
+          // Swap: use the preloaded source
           player.src = segments[currentSeg].url;
-          player.play();
-          container.querySelectorAll(".seg-btn").forEach((b) => b.classList.remove("active"));
-          const nextBtn = container.querySelector(`[data-seg-index="${currentSeg}"]`);
-          if (nextBtn) nextBtn.classList.add("active");
+          player.play().catch(() => {});
+          // Preload the one after that
+          preloadNext();
         } else if (is_active) {
           // Caught up to live — refresh to check for new segments
           setTimeout(() => this._loadEventDetail(eventId), 5000);
         }
       });
-    }
 
-    // Auto-refresh for active events (only when video is not playing)
-    if (is_active) {
-      this._activeDetailTimer = setTimeout(() => {
-        if (this._expandedEventId !== eventId) return;
-        const vid = this.shadowRoot.querySelector(`#player-${eventId}`);
-        if (vid && !vid.paused && !vid.ended) return; // Don't interrupt playback
-        this._loadEventDetail(eventId);
-      }, 30000);
+      // Allow clicking on timeline to seek
+      if (timelineBar) {
+        timelineBar.addEventListener('click', (e) => {
+          const rect = timelineBar.getBoundingClientRect();
+          const clickPct = (e.clientX - rect.left) / rect.width;
+          const targetTime = clickPct * totalDuration;
+
+          // Find which segment this falls in
+          let targetSeg = 0;
+          for (let i = segments.length - 1; i >= 0; i--) {
+            if (targetTime >= segStartTimes[i]) {
+              targetSeg = i;
+              break;
+            }
+          }
+
+          const segLocalTime = targetTime - segStartTimes[targetSeg];
+
+          if (targetSeg !== currentSeg) {
+            currentSeg = targetSeg;
+            player.src = segments[currentSeg].url;
+            player.addEventListener('loadeddata', function seekOnLoad() {
+              player.currentTime = segLocalTime;
+              player.play().catch(() => {});
+              player.removeEventListener('loadeddata', seekOnLoad);
+            });
+          } else {
+            player.currentTime = segLocalTime;
+            if (player.paused) player.play().catch(() => {});
+          }
+
+          preloadNext();
+        });
+      }
+
+      // Try to start from the event trigger time (skip pre-roll)
+      if (metadata.lookback && metadata.lookback > 0 && segments.length > 0) {
+        // The first segment includes lookback pre-roll, skip past it
+        player.addEventListener('loadeddata', function skipPreroll() {
+          if (player.currentTime < 1) {
+            const skipTo = Math.min(metadata.lookback || 0, player.duration - 1);
+            if (skipTo > 0) player.currentTime = skipTo;
+          }
+          player.removeEventListener('loadeddata', skipPreroll);
+        });
+      }
     }
   }
 
