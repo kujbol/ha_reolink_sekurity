@@ -138,14 +138,19 @@ class EventRecorder:
         new_priority = EVENT_TYPE_PRIORITY.get(new_type, 0)
 
         if new_priority > current_priority:
+            upgrade_time = datetime.now(timezone.utc).astimezone()
             _LOGGER.info(
-                "Upgrading event %s from %s to %s",
+                "[SEKURITY] Upgrading event %s from %s to %s "
+                "(%.0fs after recording start, trigger=%s)",
                 self.event_id,
                 self.event_data["event_type"],
                 new_type,
+                self.elapsed_seconds(),
+                trigger_entity,
             )
             self.event_data["event_type"] = new_type
             self.event_data["trigger_entity"] = trigger_entity
+            self.event_data["type_upgraded_at"] = upgrade_time.isoformat()
 
     @staticmethod
     def _detect_event_type(hass: HomeAssistant, entity_id: str) -> str:

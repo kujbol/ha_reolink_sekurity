@@ -5,7 +5,7 @@
  * live feed for active events, and segment playback.
  */
 
-const CARD_VERSION = "0.2.0";
+const CARD_VERSION = "0.2.1";
 
 class ReolinkHaSekurityCard extends HTMLElement {
   constructor() {
@@ -830,17 +830,60 @@ class ReolinkHaSekurityCard extends HTMLElement {
         });
       }
 
-      // Try to start from the event trigger time (skip pre-roll)
-      if (metadata.lookback && metadata.lookback > 0 && segments.length > 0) {
-        // The first segment includes lookback pre-roll, skip past it
-        player.addEventListener('loadeddata', function skipPreroll() {
-          if (player.currentTime < 1) {
-            const skipTo = Math.min(metadata.lookback || 0, player.duration - 1);
-            if (skipTo > 0) player.currentTime = skipTo;
+      // Smart seek: start from when the interesting detection occurred
+      // Priority: type_upgraded_at > lookback > beginning
+      const smartSeek = () => {
+        let seekOffset = 0; // seconds from recording start
+
+        if (metadata.type_upgraded_at && metadata.started_at) {
+          // Event was upgraded (e.g., motion→person).
+          // Seek to when the upgrade happened.
+          const startedMs = new Date(metadata.started_at).getTime();
+          const upgradedMs = new Date(metadata.type_upgraded_at).getTime();
+          seekOffset = Math.max(0, (upgradedMs - startedMs) / 1000);
+          // Back up 2 seconds so user sees the person appearing
+          seekOffset = Math.max(0, seekOffset - 2);
+        } else if (metadata.lookback && metadata.lookback > 0) {
+          // No upgrade, but has lookback pre-roll — skip past it
+          seekOffset = metadata.lookback;
+        }
+
+        if (seekOffset <= 0) return;
+
+        // Find which segment this offset falls into
+        let targetSeg = 0;
+        for (let i = segments.length - 1; i >= 0; i--) {
+          if (seekOffset >= segStartTimes[i]) {
+            targetSeg = i;
+            break;
           }
-          player.removeEventListener('loadeddata', skipPreroll);
-        });
-      }
+        }
+
+        const segLocalTime = seekOffset - segStartTimes[targetSeg];
+
+        if (targetSeg === 0) {
+          // Same first segment — just seek within it
+          player.addEventListener('loadeddata', function seekOnLoad() {
+            if (player.currentTime < 1) {
+              const skipTo = Math.min(segLocalTime, player.duration - 1);
+              if (skipTo > 0) player.currentTime = skipTo;
+            }
+            player.removeEventListener('loadeddata', seekOnLoad);
+          });
+        } else {
+          // Different segment — switch to it and seek
+          currentSeg = targetSeg;
+          player.src = segments[currentSeg].url;
+          player.addEventListener('loadeddata', function seekOnLoad() {
+            const skipTo = Math.min(segLocalTime, player.duration - 1);
+            if (skipTo > 0) player.currentTime = skipTo;
+            player.play().catch(() => {});
+            player.removeEventListener('loadeddata', seekOnLoad);
+          });
+          preloadNext();
+        }
+      };
+      smartSeek();
     }
   }
 
