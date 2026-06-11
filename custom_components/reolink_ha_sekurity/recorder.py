@@ -361,6 +361,29 @@ class EventRecorder:
             if current_lookback > 0:
                 service_data["lookback"] = current_lookback
 
+            # Pre-check: verify camera is available before attempting to record
+            cam_state = self.hass.states.get(self.camera_entity)
+            cam_state_str = cam_state.state if cam_state else "not_found"
+            stream_alive = (
+                self._stream_keeper.is_stream_alive(self.camera_entity)
+                if self._stream_keeper else "no_keeper"
+            )
+            _LOGGER.info(
+                "[SEKURITY] Pre-record check for %s seg %d: "
+                "cam_state=%s, stream_alive=%s",
+                self.event_id, self._segment_index,
+                cam_state_str, stream_alive,
+            )
+
+            if cam_state is not None and cam_state.state == "unavailable":
+                _LOGGER.warning(
+                    "[SEKURITY] Camera %s is UNAVAILABLE — skipping segment %d "
+                    "for %s (will retry after stream recovery)",
+                    self.camera_entity, self._segment_index, self.event_id,
+                )
+                self._segment_index -= 1
+                return None
+
             try:
                 await asyncio.wait_for(
                     self.hass.services.async_call(
@@ -393,13 +416,27 @@ class EventRecorder:
                 lambda: segment_path.exists() and segment_path.stat().st_size > 1024
             )
             if not file_ok:
+                # Gather extra diagnostics
+                file_exists = await self.hass.async_add_executor_job(
+                    lambda: segment_path.exists()
+                )
+                file_size_bytes = 0
+                if file_exists:
+                    file_size_bytes = await self.hass.async_add_executor_job(
+                        lambda: segment_path.stat().st_size
+                    )
+                cam_state_after = self.hass.states.get(self.camera_entity)
                 _LOGGER.warning(
                     "[SEKURITY] Segment %d for %s has NO CONTENT "
                     "(took %.1fs, expected ~%ds) — camera stream may be "
-                    "unavailable. Entity: %s, Path: %s",
+                    "unavailable. Entity: %s, Path: %s, "
+                    "file_exists=%s, file_size=%d bytes, "
+                    "cam_state_after=%s",
                     self._segment_index, self.event_id,
                     segment_elapsed, self.clip_duration,
                     self.camera_entity, segment_path,
+                    file_exists, file_size_bytes,
+                    cam_state_after.state if cam_state_after else "not_found",
                 )
                 self._segment_index -= 1  # Don't count this segment
                 return None
@@ -573,7 +610,19 @@ class EventRecorder:
 
             # Finalize event
             if self.event_data["status"] != "error":
-                complete_event_metadata(self.event_data)
+                if len(self.event_data["segments"]) == 0:
+                    _LOGGER.warning(
+                        "[SEKURITY] Event %s completed with 0 segments "
+                        "— marking as error (elapsed=%.0fs, entity=%s)",
+                        self.event_id, self.elapsed_seconds(),
+                        self.camera_entity,
+                    )
+                    fail_event_metadata(
+                        self.event_data,
+                        "No segments recorded — camera stream may have been unavailable",
+                    )
+                else:
+                    complete_event_metadata(self.event_data)
 
             await self.hass.async_add_executor_job(
                 save_event_metadata,
@@ -586,12 +635,13 @@ class EventRecorder:
             )
 
             _LOGGER.info(
-                "[SEKURITY] Event %s COMPLETE: %d segments, "
-                "duration=%.0fs, status=%s",
+                "[SEKURITY] Event %s FINISHED: %d segments, "
+                "duration=%.0fs, status=%s, error=%s",
                 self.event_id,
                 len(self.event_data["segments"]),
                 self.elapsed_seconds(),
                 self.event_data["status"],
+                self.event_data.get("error"),
             )
 
         except asyncio.CancelledError:
