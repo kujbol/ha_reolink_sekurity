@@ -5,7 +5,7 @@
  * live feed for active events, and segment playback.
  */
 
-const CARD_VERSION = "0.2.2";
+const CARD_VERSION = "0.2.3";
 
 class ReolinkHaSekurityCard extends HTMLElement {
   constructor() {

@@ -215,7 +215,7 @@ class ReolinkHaSekurityCoordinator:
 
     @property
     def dashboard_path(self) -> str:
-        return self.config.get(CONF_DASHBOARD_PATH, "/lovelace/security")
+        return self.config.get(CONF_DASHBOARD_PATH, "/dashboard-security")
 
     @property
     def cameras(self) -> dict[str, dict]:
