@@ -71,7 +71,11 @@ async def send_event_notification(
     camera = event_data["camera"]
     event_type = event_data["event_type"]
     snapshot = event_data.get("snapshot")
-    deep_link = f"{dashboard_path}?event_id={event_id}"
+
+    # Use homeassistant://navigate/ for reliable deep linking on both platforms.
+    # Strip leading slash from dashboard_path to avoid double-slash in the URI.
+    nav_path = dashboard_path.lstrip("/")
+    deep_link = f"homeassistant://navigate/{nav_path}?event_id={event_id}"
 
     title = f"\U0001f6a8 {event_type.title()} — {camera}"
     message = "Tap to view"

@@ -54,3 +54,7 @@ CONF_MAX_DURATION = "max_duration"
 DEFAULT_MAX_DURATION = 300
 CONF_LOOKBACK = "lookback"
 CONF_POST_ROLL = "post_roll"
+CONF_SENSOR_DEBOUNCE = "sensor_debounce"
+
+# --- Sensor debounce ---
+DEFAULT_SENSOR_DEBOUNCE = 2  # seconds — sensor must stay ON this long to trigger recording

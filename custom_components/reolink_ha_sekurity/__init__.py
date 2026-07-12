@@ -33,6 +33,7 @@ from .const import (
     CONF_NIGHT_START,
     CONF_NOTIFY_TARGETS,
     CONF_POST_ROLL,
+    CONF_SENSOR_DEBOUNCE,
     CONF_TRIGGER_SENSORS,
     CONF_RECORD_SENSORS,
     CONF_ALARM_SENSORS,
@@ -45,6 +46,7 @@ from .const import (
     DEFAULT_NIGHT_END,
     DEFAULT_NIGHT_START,
     DEFAULT_POST_ROLL,
+    DEFAULT_SENSOR_DEBOUNCE,
     DOMAIN,
     EVENT_TYPE_PRIORITY,
     FULL_ALARM_ENTITY,
@@ -193,6 +195,7 @@ class ReolinkHaSekurityCoordinator:
         self._sensor_to_camera: dict[str, str] = {}  # sensor_entity → camera_name
         self._nas_error_notified: bool = False  # Prevents notification spam when NAS is down
         self._cancel_health_check: callback | None = None  # Periodic stuck-recorder check
+        self._debounce_handles: dict[str, asyncio.TimerHandle] = {}  # sensor_entity → timer
 
         # Grace period beyond max_duration before force-killing a recorder
         self.STUCK_RECORDER_GRACE = 60  # seconds
@@ -351,9 +354,77 @@ class ReolinkHaSekurityCoordinator:
 
         if new_val in ("on", "detected"):
             _LOGGER.warning("[SEKURITY] DETECTION: %s on %s", entity_id, camera_name)
-            await self._handle_sensor_on(entity_id, camera_name, cam_cfg)
+
+            # If there's already an active event, skip debounce (re-fire handling)
+            if camera_name in self.active_events:
+                await self._handle_sensor_on(entity_id, camera_name, cam_cfg)
+                return
+
+            # Debounce: wait before starting a new event to filter sub-second blips
+            debounce_secs = cam_cfg.get(
+                CONF_SENSOR_DEBOUNCE, DEFAULT_SENSOR_DEBOUNCE
+            )
+            if debounce_secs > 0:
+                # Cancel any existing debounce timer for this sensor
+                existing = self._debounce_handles.pop(entity_id, None)
+                if existing is not None:
+                    existing.cancel()
+
+                _LOGGER.info(
+                    "[SEKURITY] Debouncing %s for %ds before starting event",
+                    entity_id, debounce_secs,
+                )
+                loop = self.hass.loop
+                handle = loop.call_later(
+                    debounce_secs,
+                    lambda eid=entity_id, cn=camera_name, cc=cam_cfg: (
+                        self.hass.async_create_task(
+                            self._debounce_fire(eid, cn, cc),
+                            f"sekurity_debounce_{eid}",
+                        )
+                    ),
+                )
+                self._debounce_handles[entity_id] = handle
+            else:
+                await self._handle_sensor_on(entity_id, camera_name, cam_cfg)
+
         elif new_val in ("off", "clear", "unavailable", "unknown") and old_val in ("on", "detected"):
-            await self._handle_sensor_off(entity_id, camera_name)
+            # Cancel pending debounce if sensor turned off before debounce fired
+            pending = self._debounce_handles.pop(entity_id, None)
+            if pending is not None:
+                pending.cancel()
+                _LOGGER.info(
+                    "[SEKURITY] Debounce CANCELLED for %s on %s "
+                    "(sensor turned off within debounce window — likely false positive)",
+                    entity_id, camera_name,
+                )
+            else:
+                await self._handle_sensor_off(entity_id, camera_name)
+
+    async def _debounce_fire(
+        self, entity_id: str, camera_name: str, cam_cfg: dict
+    ) -> None:
+        """Called after debounce timer expires. Start recording if sensor is still on."""
+        # Clean up the handle reference
+        self._debounce_handles.pop(entity_id, None)
+
+        # Verify the sensor is still on (it could have turned off and back on)
+        state = self.hass.states.get(entity_id)
+        sensor_val = state.state if state else "unknown"
+
+        if sensor_val in ("on", "detected"):
+            _LOGGER.warning(
+                "[SEKURITY] Debounce CONFIRMED for %s on %s "
+                "(sensor still on after debounce — starting event)",
+                entity_id, camera_name,
+            )
+            await self._handle_sensor_on(entity_id, camera_name, cam_cfg)
+        else:
+            _LOGGER.info(
+                "[SEKURITY] Debounce EXPIRED for %s on %s "
+                "(sensor is now %s — skipping event, likely false positive)",
+                entity_id, camera_name, sensor_val,
+            )
 
     async def _handle_sensor_on(
         self, entity_id: str, camera_name: str, cam_cfg: dict
