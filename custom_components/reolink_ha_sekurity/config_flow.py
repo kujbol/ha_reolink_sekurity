@@ -167,7 +167,7 @@ class ReolinkHaSekurityConfigFlow(
                     CONF_LIGHT_TIMEOUT, DEFAULT_LIGHT_TIMEOUT
                 ),
                 CONF_DASHBOARD_PATH: user_input.get(
-                    CONF_DASHBOARD_PATH, "/dashboard-security"
+                    CONF_DASHBOARD_PATH, "/dashboard-security/security"
                 ),
             }
             return await self.async_step_camera()
@@ -205,7 +205,7 @@ class ReolinkHaSekurityConfigFlow(
                         )
                     ),
                     vol.Required(
-                        CONF_DASHBOARD_PATH, default="/dashboard-security"
+                        CONF_DASHBOARD_PATH, default="/dashboard-security/security"
                     ): TextSelector(TextSelectorConfig(type="text")),
                 }
             ),
@@ -420,7 +420,7 @@ class ReolinkHaSekurityOptionsFlow(config_entries.OptionsFlow):
             )
             new_data[CONF_DASHBOARD_PATH] = user_input.get(
                 CONF_DASHBOARD_PATH,
-                current.get(CONF_DASHBOARD_PATH, "/dashboard-security"),
+                current.get(CONF_DASHBOARD_PATH, "/dashboard-security/security"),
             )
             self.hass.config_entries.async_update_entry(
                 self._config_entry, data=new_data
@@ -467,7 +467,7 @@ class ReolinkHaSekurityOptionsFlow(config_entries.OptionsFlow):
                     ),
                     vol.Required(
                         CONF_DASHBOARD_PATH,
-                        default=current.get(CONF_DASHBOARD_PATH, "/dashboard-security"),
+                        default=current.get(CONF_DASHBOARD_PATH, "/dashboard-security/security"),
                     ): TextSelector(TextSelectorConfig(type="text")),
                 }
             ),

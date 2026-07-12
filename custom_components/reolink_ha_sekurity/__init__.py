@@ -218,7 +218,7 @@ class ReolinkHaSekurityCoordinator:
 
     @property
     def dashboard_path(self) -> str:
-        return self.config.get(CONF_DASHBOARD_PATH, "/dashboard-security")
+        return self.config.get(CONF_DASHBOARD_PATH, "/dashboard-security/security")
 
     @property
     def cameras(self) -> dict[str, dict]:
@@ -445,7 +445,6 @@ class ReolinkHaSekurityCoordinator:
                 )
                 recorder.stop()
                 self.active_events.pop(camera_name, None)
-                # Fall through to start a new recording
             else:
                 # Event already recording — upgrade type if needed and reset merge
                 recorder.upgrade_event_type(entity_id)
@@ -457,6 +456,29 @@ class ReolinkHaSekurityCoordinator:
                     recorder.elapsed_seconds(),
                     len(recorder.event_data.get("segments", [])),
                 )
+
+                # If this trigger is an alarm sensor and notification hasn't been sent, notify now
+                alarm_sensors = cam_cfg.get(CONF_ALARM_SENSORS, cam_cfg.get(CONF_TRIGGER_SENSORS, []))
+                is_alarm_sensor = entity_id in alarm_sensors
+
+                if is_alarm_sensor and not recorder.event_data.get("notification_sent"):
+                    if should_notify(self.hass, True, self.night_start, self.night_end):
+                        recorder.event_data["alarm_active"] = True
+                        recorder.event_data["notification_sent"] = True
+                        self.hass.async_create_task(
+                            send_event_notification(
+                                self.hass,
+                                recorder.event_data,
+                                self.notify_targets,
+                                self.dashboard_path,
+                            )
+                        )
+                    if should_activate_lights(self.hass, True, self.night_start, self.night_end):
+                        recorder.event_data["lights_activated"] = True
+                        if self._light_controller:
+                            self.hass.async_create_task(
+                                self._light_controller.activate()
+                            )
                 return
 
         # Verify NAS is available before starting a new recording
