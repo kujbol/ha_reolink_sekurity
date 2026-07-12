@@ -5,7 +5,7 @@
  * live feed for active events, and segment playback.
  */
 
-const CARD_VERSION = "0.2.6";
+const CARD_VERSION = "0.2.7";
 
 class ReolinkHaSekurityCard extends HTMLElement {
   constructor() {
@@ -29,7 +29,10 @@ class ReolinkHaSekurityCard extends HTMLElement {
     this._hass = hass;
     if (!this._initialized) {
       this._initialized = true;
-      this._fetchEvents();
+      this._checkDeepLink();
+      if (!this._expandedEventId) {
+        this._fetchEvents();
+      }
       this._startAutoRefresh();
     }
     this._updateAlarmStates();
@@ -50,17 +53,25 @@ class ReolinkHaSekurityCard extends HTMLElement {
   connectedCallback() {
     this._render();
     this._checkDeepLink();
+
+    this._onLocationChange = () => this._checkDeepLink();
+    window.addEventListener("location-changed", this._onLocationChange);
+    window.addEventListener("popstate", this._onLocationChange);
   }
 
   disconnectedCallback() {
     if (this._refreshInterval) {
       clearInterval(this._refreshInterval);
     }
+    if (this._onLocationChange) {
+      window.removeEventListener("location-changed", this._onLocationChange);
+      window.removeEventListener("popstate", this._onLocationChange);
+    }
   }
 
   // --- Data fetching ---
 
-  async _fetchEvents() {
+  async _fetchEvents(forceRender = false) {
     if (!this._hass) return;
     try {
       const params = new URLSearchParams({
@@ -77,8 +88,9 @@ class ReolinkHaSekurityCard extends HTMLElement {
       this._activeEvents = resp.active_events || {};
       this._cameras = resp.cameras || [];
       
-      // Do not re-render if an event is currently expanded to prevent interrupting playback
-      if (!this._expandedEventId) {
+      // Do not re-render if an event is currently expanded to prevent interrupting playback,
+      // unless forceRender is true (needed for initial load and deep link changes).
+      if (!this._expandedEventId || forceRender) {
         this._render();
       }
     } catch (e) {
@@ -115,13 +127,18 @@ class ReolinkHaSekurityCard extends HTMLElement {
     const params = new URLSearchParams(window.location.search);
     const eventId = params.get("event_id");
     if (eventId) {
-      this._expandedEventId = eventId;
-      const parts = eventId.split('_');
-      if (parts.length >= 3) {
-        this._selectedCamera = parts.slice(2).join('_');
+      if (this._expandedEventId !== eventId) {
+        this._expandedEventId = eventId;
+        const parts = eventId.split('_');
+        if (parts.length >= 3) {
+          this._selectedCamera = parts.slice(2).join('_');
+        }
+        this._selectedFilter = "all"; // Ensure we can see the deep-linked event
+        this._fetchEvents(true); // Force render for deep links
       }
-      this._selectedFilter = "all"; // Ensure we can see the deep-linked event
-      this._fetchEvents();
+    } else if (this._expandedEventId) {
+      this._expandedEventId = null;
+      this._render();
     }
   }
 
