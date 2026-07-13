@@ -925,10 +925,23 @@ class ConfigAPIView(HomeAssistantView):
 
     async def get(self, request):
         from aiohttp import web
+        from pathlib import Path
+
+        config_dir = Path(self._coordinator.hass.config.config_dir)
+        go2rtc_path = config_dir / "go2rtc.yaml"
+        go2rtc_content = None
+        if go2rtc_path.exists():
+            try:
+                go2rtc_content = go2rtc_path.read_text()
+            except Exception as e:
+                go2rtc_content = f"Error reading: {e}"
+
         return web.json_response({
             "dashboard_path": self._coordinator.dashboard_path,
             "notify_targets": self._coordinator.notify_targets,
             "media_path": self._coordinator.media_path,
             "cameras": list(self._coordinator.cameras.keys()),
             "config_raw": dict(self._coordinator.config),
+            "go2rtc_exists": go2rtc_path.exists(),
+            "go2rtc_content": go2rtc_content,
         })
