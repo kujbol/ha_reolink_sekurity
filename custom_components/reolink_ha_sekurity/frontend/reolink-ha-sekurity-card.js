@@ -5,7 +5,7 @@
  * live feed for active events, and segment playback.
  */
 
-const CARD_VERSION = "0.2.7";
+const CARD_VERSION = "0.2.8";
 
 class ReolinkHaSekurityCard extends HTMLElement {
   constructor() {
@@ -124,6 +124,12 @@ class ReolinkHaSekurityCard extends HTMLElement {
   }
 
   _checkDeepLink() {
+    if (this._hass) {
+      this._hass.callService("system_log", "write", {
+        level: "warning",
+        message: `[SEKURITY-CARD] _checkDeepLink: href=${window.location.href}, search=${window.location.search}, hash=${window.location.hash}`
+      });
+    }
     const params = new URLSearchParams(window.location.search);
     const eventId = params.get("event_id");
     if (eventId) {
