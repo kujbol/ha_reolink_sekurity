@@ -272,6 +272,7 @@ class ReolinkHaSekurityCoordinator:
         self.hass.http.register_view(EventsAPIView(self))
         self.hass.http.register_view(EventDetailAPIView(self))
         self.hass.http.register_view(MediaFileView(self))
+        self.hass.http.register_view(ConfigAPIView(self))
 
         _LOGGER.warning(
             "[SEKURITY] Ready — monitoring %d cameras, %d sensors",
@@ -903,3 +904,24 @@ class MediaFileView(HomeAssistantView):
             file_path,
             headers={"Content-Type": content_type},
         )
+
+
+class ConfigAPIView(HomeAssistantView):
+    """API endpoint to get coordinator config (for debugging)."""
+
+    url = "/api/reolink_ha_sekurity/config"
+    name = "api:reolink_ha_sekurity:config"
+    requires_auth = True
+
+    def __init__(self, coordinator: ReolinkHaSekurityCoordinator):
+        self._coordinator = coordinator
+
+    async def get(self, request):
+        from aiohttp import web
+        return web.json_response({
+            "dashboard_path": self._coordinator.dashboard_path,
+            "notify_targets": self._coordinator.notify_targets,
+            "media_path": self._coordinator.media_path,
+            "cameras": list(self._coordinator.cameras.keys()),
+            "config_raw": dict(self._coordinator.config),
+        })
