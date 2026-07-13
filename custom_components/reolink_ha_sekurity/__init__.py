@@ -98,6 +98,13 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Reolink HA Sekurity from a config entry."""
+    # Migration: if dashboard_path is /lovelace/security, migrate it to the new default /dashboard-security/security
+    if entry.data.get(CONF_DASHBOARD_PATH) == "/lovelace/security":
+        new_data = dict(entry.data)
+        new_data[CONF_DASHBOARD_PATH] = "/dashboard-security/security"
+        hass.config_entries.async_update_entry(entry, data=new_data)
+        _LOGGER.warning("[SEKURITY] Migrated dashboard_path config to /dashboard-security/security")
+
     coordinator = ReolinkHaSekurityCoordinator(hass, entry)
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = coordinator
