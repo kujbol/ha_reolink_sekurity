@@ -11,6 +11,7 @@ from homeassistant.components.http import HomeAssistantView
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_STATE_CHANGED
 from homeassistant.core import Event, HomeAssistant, callback
+from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers.event import (
     async_track_state_change_event,
     async_track_time_interval,
@@ -108,7 +109,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = ReolinkHaSekurityCoordinator(hass, entry)
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = coordinator
-    await coordinator.async_setup()
+
+    try:
+        await coordinator.async_setup()
+    except MediaPathUnavailable as exc:
+        _LOGGER.warning("[SEKURITY] NAS media path not ready during setup: %s", exc)
+        raise ConfigEntryNotReady(f"NAS media path unavailable: {exc}") from exc
 
     # Automatically register the Lovelace resource
     hass.async_create_task(_async_register_lovelace_resource(hass))

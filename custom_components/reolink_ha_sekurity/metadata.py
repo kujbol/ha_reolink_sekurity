@@ -20,7 +20,12 @@ class MediaPathUnavailable(Exception):
 
 def _ensure_dir(path: Path) -> None:
     """Create directory if it doesn't exist."""
-    path.mkdir(parents=True, exist_ok=True)
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except (OSError, PermissionError) as exc:
+        raise MediaPathUnavailable(
+            f"Failed to create directory '{path}': {exc}"
+        ) from exc
 
 
 def _write_json(path: Path, data: dict | list) -> None:
@@ -30,11 +35,16 @@ def _write_json(path: Path, data: dict | list) -> None:
         with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, default=str)
         tmp_path.rename(path)
-    except OSError:
+    except (OSError, PermissionError) as exc:
         _LOGGER.exception("Failed to write JSON to %s", path)
         if tmp_path.exists():
-            tmp_path.unlink()
-        raise
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+        raise MediaPathUnavailable(
+            f"Failed to write JSON to '{path}': {exc}"
+        ) from exc
 
 
 def _read_json(path: Path) -> dict | list | None:
@@ -54,22 +64,55 @@ def get_media_base_path(media_path: str) -> Path:
     return Path("/media") / media_path
 
 
+def is_nas_mounted(mount_point: Path) -> bool:
+    """Check if mount_point is an active mount point in Linux/HA."""
+    if not mount_point.exists() or not mount_point.is_dir():
+        return False
+
+    # If mount_point is /media itself, treat as valid local storage
+    if mount_point.resolve() == Path("/media").resolve():
+        return True
+
+    # 1. Standard Python mount check (checks st_dev difference)
+    if os.path.ismount(mount_point):
+        return True
+
+    # 2. Linux /proc/mounts check
+    try:
+        proc_mounts = Path("/proc/mounts")
+        if proc_mounts.exists():
+            target_str = str(mount_point.resolve())
+            with open(proc_mounts, "r", encoding="utf-8") as f:
+                for line in f:
+                    parts = line.split()
+                    if len(parts) >= 2 and parts[1] == target_str:
+                        return True
+    except Exception:
+        pass
+
+    return False
+
+
 def verify_media_path(media_path: str) -> None:
-    """Verify the media base path (NAS mount) exists.
+    """Verify the media base path (NAS mount) exists, is mounted, and is writable.
 
     The first component of media_path is the mount name (e.g. 'camera_on_nas').
-    We check that /media/<mount_name> exists — if it doesn't, the NAS is
-    unmounted and we must NOT create local directories.
+    We check that /media/<mount_name> is actively mounted by Home Assistant —
+    if it is not mounted, we raise MediaPathUnavailable without creating local directories.
 
-    Raises MediaPathUnavailable if the mount is not present.
+    Raises MediaPathUnavailable if the mount is not present or not writable.
     """
     mount_name = media_path.split("/")[0]
     mount_point = Path("/media") / mount_name
-    if not mount_point.exists():
+
+    if not is_nas_mounted(mount_point):
         raise MediaPathUnavailable(
-            f"Media mount '/media/{mount_name}' does not exist. "
+            f"Media mount '/media/{mount_name}' is not mounted yet by Home Assistant. "
             f"Is the NAS mounted? Check Settings → System → Storage."
         )
+
+    base_path = get_media_base_path(media_path)
+    _ensure_dir(base_path)
 
 
 def get_camera_dir(media_path: str, camera_name: str) -> Path:
