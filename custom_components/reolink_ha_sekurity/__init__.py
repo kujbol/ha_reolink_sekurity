@@ -70,6 +70,7 @@ from .metadata import (
 )
 from .notifications import send_error_notification, send_event_notification
 from .recorder import EventRecorder
+from .sd_recovery import download_segment_from_sd
 from .stream_keeper import StreamKeeper
 
 _LOGGER = logging.getLogger(__name__)
@@ -849,10 +850,38 @@ class EventDetailAPIView(HomeAssistantView):
         from homeassistant.components.http.auth import async_sign_path
         from datetime import timedelta
 
-        base_media_url = f"/api/reolink_ha_sekurity/media/{camera_name}/{event_id}"
+        event_dir = get_event_dir(self._coordinator.media_path, camera_name, event_id)
+        camera_entity = metadata.get("camera_entity", "")
+
+        # Filter out missing or 0-byte segment files on disk (attempting SD card recovery if needed)
+        valid_segments = []
+        for seg in metadata.get("segments", []):
+            seg_path = event_dir / seg["file"]
+            if not (seg_path.exists() and seg_path.stat().st_size > 1024):
+                if camera_entity:
+                    start_iso = metadata.get("started_at")
+                    try:
+                        start_dt = datetime.fromisoformat(start_iso) if start_iso else datetime.now(timezone.utc)
+                    except Exception:
+                        start_dt = datetime.now(timezone.utc)
+                    idx = seg.get("index", 1) - 1
+                    dur = seg.get("duration", 30)
+                    seg_start = start_dt + timedelta(seconds=idx * dur)
+                    seg_end = seg_start + timedelta(seconds=dur)
+                    ok = await download_segment_from_sd(
+                        self._coordinator.hass,
+                        camera_entity,
+                        seg_path,
+                        seg_start,
+                        seg_end,
+                    )
+                    if ok:
+                        valid_segments.append(seg)
+            else:
+                valid_segments.append(seg)
 
         segments_with_urls = []
-        for seg in metadata.get("segments", []):
+        for seg in valid_segments:
             raw_url = f"{base_media_url}/{seg['file']}"
             signed = async_sign_path(
                 self._coordinator.hass,

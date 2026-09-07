@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -12,6 +12,8 @@ from homeassistant.core import HomeAssistant
 
 if TYPE_CHECKING:
     from .stream_keeper import StreamKeeper
+
+from .sd_recovery import download_segment_from_sd
 
 from .const import (
     DEFAULT_CLIP_DURATION,
@@ -625,6 +627,22 @@ class EventRecorder:
                 else:
                     complete_event_metadata(self.event_data)
                     if self.event_dir:
+                        # Attempt MicroSD card recovery for any missing/0-byte segment files
+                        for seg in self.event_data.get("segments", []):
+                            seg_path = self.event_dir / seg["file"]
+                            if not (seg_path.exists() and seg_path.stat().st_size > 1024):
+                                idx = seg.get("index", 1) - 1
+                                dur = seg.get("duration", 30)
+                                seg_start = self.started_at + timedelta(seconds=idx * dur)
+                                seg_end = seg_start + timedelta(seconds=dur)
+                                await download_segment_from_sd(
+                                    self.hass,
+                                    self.camera_entity,
+                                    seg_path,
+                                    seg_start,
+                                    seg_end,
+                                )
+
                         await self.hass.async_add_executor_job(
                             merge_event_segments, self.event_dir, self.event_data
                         )

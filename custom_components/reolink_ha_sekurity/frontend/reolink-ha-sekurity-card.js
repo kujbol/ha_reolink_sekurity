@@ -5,7 +5,7 @@
  * live feed for active events, and segment playback.
  */
 
-const CARD_VERSION = "0.2.16";
+const CARD_VERSION = "0.2.17";
 
 class ReolinkHaSekurityCard extends HTMLElement {
   constructor() {
@@ -878,6 +878,21 @@ class ReolinkHaSekurityCard extends HTMLElement {
 
       // Preload first next segment
       preloadNext();
+
+      // Error recovery: if stream or segment fails to load/play, try fallback
+      player.addEventListener('error', (e) => {
+        console.warn(`[SEKURITY] Video playback error for ${eventId}:`, player.error);
+        if (stream_url && player.src.includes("event.mp4") && segments && segments.length > 0) {
+          console.info(`[SEKURITY] Falling back from stream_url to segment 1 for ${eventId}`);
+          player.src = segments[0].url;
+          player.play().catch(() => {});
+        } else if (segments && currentSeg + 1 < segments.length) {
+          currentSeg++;
+          console.info(`[SEKURITY] Skipping unplayable segment ${currentSeg + 1} for ${eventId}`);
+          player.src = segments[currentSeg].url;
+          player.play().catch(() => {});
+        }
+      });
 
       // Segment transition or completion
       player.addEventListener('ended', () => {
