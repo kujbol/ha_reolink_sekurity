@@ -5,7 +5,7 @@
  * live feed for active events, and segment playback.
  */
 
-const CARD_VERSION = "0.2.12";
+const CARD_VERSION = "0.2.13";
 
 class ReolinkHaSekurityCard extends HTMLElement {
   constructor() {
@@ -19,10 +19,25 @@ class ReolinkHaSekurityCard extends HTMLElement {
     this._selectedCamera = "all";
     this._selectedFilter = "security";
     this._expandedEventId = null;
+    this._lastProcessedDeepLink = null;
     this._currentSegmentIndex = 0;
     this._refreshInterval = null;
     this._limit = 25;
     this._offset = 0;
+  }
+
+  _updateUrlParam(eventId) {
+    try {
+      const url = new URL(window.location.href);
+      if (eventId) {
+        url.searchParams.set("event_id", eventId);
+      } else {
+        url.searchParams.delete("event_id");
+      }
+      window.history.replaceState(null, "", url.toString());
+    } catch (_) {
+      // Ignore if URL manipulation fails in restricted environments
+    }
   }
 
   set hass(hass) {
@@ -132,7 +147,8 @@ class ReolinkHaSekurityCard extends HTMLElement {
     }
     const params = new URLSearchParams(window.location.search);
     const eventId = params.get("event_id");
-    if (eventId) {
+    if (eventId && this._lastProcessedDeepLink !== eventId) {
+      this._lastProcessedDeepLink = eventId;
       if (this._expandedEventId !== eventId) {
         this._expandedEventId = eventId;
         const parts = eventId.split('_');
@@ -418,19 +434,37 @@ class ReolinkHaSekurityCard extends HTMLElement {
       .timeline-bar {
         position: relative;
         width: 100%;
-        height: 20px;
+        height: 24px;
         background: rgba(255,255,255,0.08);
-        border-radius: 10px;
+        border-radius: 12px;
         margin: 8px 0;
         cursor: pointer;
         overflow: hidden;
+        touch-action: none;
+        user-select: none;
+        -webkit-user-select: none;
       }
       .timeline-progress {
         height: 100%;
         background: var(--accent);
-        border-radius: 10px;
-        transition: width 0.3s linear;
+        border-radius: 12px;
+        transition: width 0.1s linear;
         min-width: 2px;
+        pointer-events: none;
+      }
+      .timeline-handle {
+        position: absolute;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        width: 16px;
+        height: 16px;
+        background: #ffffff;
+        border: 2px solid var(--accent);
+        border-radius: 50%;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.4);
+        pointer-events: none;
+        transition: left 0.1s linear;
+        z-index: 2;
       }
       .timeline-tick {
         position: absolute;
@@ -438,6 +472,7 @@ class ReolinkHaSekurityCard extends HTMLElement {
         width: 1px;
         height: 100%;
         background: rgba(255,255,255,0.15);
+        pointer-events: none;
       }
       .timeline-info {
         display: flex;
@@ -574,7 +609,8 @@ class ReolinkHaSekurityCard extends HTMLElement {
 
     // --- Event listeners ---
     this.shadowRoot.querySelectorAll(".camera-tab[data-camera]").forEach((tab) => {
-      tab.addEventListener("click", () => {
+      tab.addEventListener("click", (e) => {
+        e.stopPropagation();
         this._selectedCamera = tab.dataset.camera;
         this._offset = 0;
         this._fetchEvents();
@@ -582,7 +618,8 @@ class ReolinkHaSekurityCard extends HTMLElement {
     });
 
     this.shadowRoot.querySelectorAll(".camera-tab[data-filter]").forEach((tab) => {
-      tab.addEventListener("click", () => {
+      tab.addEventListener("click", (e) => {
+        e.stopPropagation();
         this._selectedFilter = tab.dataset.filter;
         this._offset = 0;
         this._fetchEvents();
@@ -590,13 +627,18 @@ class ReolinkHaSekurityCard extends HTMLElement {
     });
 
     this.shadowRoot.querySelectorAll(".event-row").forEach((row) => {
-      row.addEventListener("click", () => {
+      row.addEventListener("click", (e) => {
+        e.stopPropagation();
         const eventId = row.dataset.eventId;
         if (this._expandedEventId === eventId) {
           this._expandedEventId = null;
+          this._lastProcessedDeepLink = null;
+          this._updateUrlParam(null);
           this._render();
         } else {
           this._expandedEventId = eventId;
+          this._lastProcessedDeepLink = eventId;
+          this._updateUrlParam(eventId);
           this._render();
           this._loadEventDetail(eventId);
         }
@@ -705,6 +747,7 @@ class ReolinkHaSekurityCard extends HTMLElement {
             <div class="timeline-bar" id="timeline-${eventId}">
               ${ticksHtml}
               <div class="timeline-progress" id="progress-${eventId}" style="width:0%"></div>
+              <div class="timeline-handle" id="handle-${eventId}" style="left:0%"></div>
             </div>
             <div class="timeline-info">
               <span id="time-current-${eventId}">0:00</span>
@@ -751,9 +794,17 @@ class ReolinkHaSekurityCard extends HTMLElement {
     const player = container.querySelector(`#player-${eventId}`);
     const preloadEl = container.querySelector(`#preload-${eventId}`);
     const progressBar = container.querySelector(`#progress-${eventId}`);
+    const handlePin = container.querySelector(`#handle-${eventId}`);
     const timeCurrentEl = container.querySelector(`#time-current-${eventId}`);
     const segInfoEl = container.querySelector(`#seg-info-${eventId}`);
     const timelineBar = container.querySelector(`#timeline-${eventId}`);
+    const videoContainer = container.querySelector(`#vpc-${eventId}`);
+
+    if (videoContainer) {
+      ["touchstart", "touchmove", "pointerdown", "pointermove", "click"].forEach((evtName) => {
+        videoContainer.addEventListener(evtName, (e) => e.stopPropagation());
+      });
+    }
 
     if (player && segments && segments.length > 0) {
       let currentSeg = 0;
@@ -787,6 +838,7 @@ class ReolinkHaSekurityCard extends HTMLElement {
         const globalTime = segOffset + (player.currentTime || 0);
         const pct = Math.min((globalTime / totalDuration) * 100, 100);
         if (progressBar) progressBar.style.width = `${pct}%`;
+        if (handlePin) handlePin.style.left = `${pct}%`;
         if (timeCurrentEl) timeCurrentEl.textContent = fmtTime(globalTime);
         if (segInfoEl) segInfoEl.textContent = `Segment ${currentSeg + 1}/${segments.length}`;
       };
@@ -815,14 +867,22 @@ class ReolinkHaSekurityCard extends HTMLElement {
         }
       });
 
-      // Allow clicking on timeline to seek
+      // Allow clicking and touch dragging on timeline to seek smoothly
       if (timelineBar) {
-        timelineBar.addEventListener('click', (e) => {
+        let isDragging = false;
+
+        const seekToClientX = (clientX) => {
           const rect = timelineBar.getBoundingClientRect();
-          const clickPct = (e.clientX - rect.left) / rect.width;
+          if (!rect.width) return;
+          const clickPct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
           const targetTime = clickPct * totalDuration;
 
-          // Find which segment this falls in
+          // Update UI immediately during drag
+          if (progressBar) progressBar.style.width = `${clickPct * 100}%`;
+          if (handlePin) handlePin.style.left = `${clickPct * 100}%`;
+          if (timeCurrentEl) timeCurrentEl.textContent = fmtTime(targetTime);
+
+          // Find which segment targetTime falls into
           let targetSeg = 0;
           for (let i = segments.length - 1; i >= 0; i--) {
             if (targetTime >= segStartTimes[i]) {
@@ -838,15 +898,75 @@ class ReolinkHaSekurityCard extends HTMLElement {
             player.src = segments[currentSeg].url;
             player.addEventListener('loadeddata', function seekOnLoad() {
               player.currentTime = segLocalTime;
-              player.play().catch(() => {});
+              if (player.paused && !isDragging) player.play().catch(() => {});
               player.removeEventListener('loadeddata', seekOnLoad);
             });
           } else {
             player.currentTime = segLocalTime;
-            if (player.paused) player.play().catch(() => {});
           }
 
           preloadNext();
+        };
+
+        const handlePointerDown = (e) => {
+          e.stopPropagation();
+          if (e.cancelable) e.preventDefault();
+          isDragging = true;
+          if (timelineBar.setPointerCapture && e.pointerId !== undefined) {
+            try { timelineBar.setPointerCapture(e.pointerId); } catch (_) {}
+          }
+          seekToClientX(e.clientX);
+        };
+
+        const handlePointerMove = (e) => {
+          if (!isDragging) return;
+          e.stopPropagation();
+          if (e.cancelable) e.preventDefault();
+          seekToClientX(e.clientX);
+        };
+
+        const handlePointerUp = (e) => {
+          if (!isDragging) return;
+          e.stopPropagation();
+          if (e.cancelable) e.preventDefault();
+          isDragging = false;
+          if (timelineBar.releasePointerCapture && e.pointerId !== undefined) {
+            try { timelineBar.releasePointerCapture(e.pointerId); } catch (_) {}
+          }
+          if (player.paused) player.play().catch(() => {});
+        };
+
+        timelineBar.addEventListener('pointerdown', handlePointerDown);
+        timelineBar.addEventListener('pointermove', handlePointerMove);
+        timelineBar.addEventListener('pointerup', handlePointerUp);
+        timelineBar.addEventListener('pointercancel', handlePointerUp);
+
+        // Touch event fallbacks for touchscreens where pointer events might be passive
+        timelineBar.addEventListener('touchstart', (e) => {
+          e.stopPropagation();
+          if (e.touches && e.touches.length > 0) {
+            handlePointerDown({
+              clientX: e.touches[0].clientX,
+              stopPropagation: () => e.stopPropagation(),
+              preventDefault: () => { if (e.cancelable) e.preventDefault(); }
+            });
+          }
+        }, { passive: false });
+
+        timelineBar.addEventListener('touchmove', (e) => {
+          e.stopPropagation();
+          if (e.cancelable) e.preventDefault();
+          if (isDragging && e.touches && e.touches.length > 0) {
+            seekToClientX(e.touches[0].clientX);
+          }
+        }, { passive: false });
+
+        timelineBar.addEventListener('touchend', (e) => {
+          e.stopPropagation();
+          if (isDragging) {
+            isDragging = false;
+            if (player.paused) player.play().catch(() => {});
+          }
         });
       }
 
