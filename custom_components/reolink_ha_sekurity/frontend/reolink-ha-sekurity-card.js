@@ -5,7 +5,7 @@
  * live feed for active events, and segment playback.
  */
 
-const CARD_VERSION = "0.2.14";
+const CARD_VERSION = "0.2.15";
 
 class ReolinkHaSekurityCard extends HTMLElement {
   constructor() {
@@ -188,6 +188,9 @@ class ReolinkHaSekurityCard extends HTMLElement {
   // --- Rendering ---
 
   _render() {
+    const prevList = this.shadowRoot.querySelector(".events-list");
+    const savedScrollTop = prevList ? prevList.scrollTop : null;
+
     const style = `
       :host {
         --card-bg: var(--ha-card-background, var(--card-background-color, #1c1c1e));
@@ -606,6 +609,14 @@ class ReolinkHaSekurityCard extends HTMLElement {
         </div>
       </ha-card>
     `;
+
+    const newList = this.shadowRoot.querySelector(".events-list");
+    if (newList && savedScrollTop !== null) {
+      newList.scrollTop = savedScrollTop;
+      requestAnimationFrame(() => {
+        if (newList) newList.scrollTop = savedScrollTop;
+      });
+    }
 
     // --- Event listeners ---
     this.shadowRoot.querySelectorAll(".camera-tab[data-camera]").forEach((tab) => {
