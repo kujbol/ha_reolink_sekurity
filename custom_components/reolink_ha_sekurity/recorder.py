@@ -29,6 +29,7 @@ from .metadata import (
     ensure_event_dir,
     fail_event_metadata,
     generate_event_id,
+    merge_event_segments,
     save_event_metadata,
 )
 
@@ -623,6 +624,10 @@ class EventRecorder:
                     )
                 else:
                     complete_event_metadata(self.event_data)
+                    if self.event_dir:
+                        await self.hass.async_add_executor_job(
+                            merge_event_segments, self.event_dir, self.event_data
+                        )
 
             await self.hass.async_add_executor_job(
                 save_event_metadata,

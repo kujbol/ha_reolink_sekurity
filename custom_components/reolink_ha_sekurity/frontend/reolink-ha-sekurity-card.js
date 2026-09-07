@@ -5,7 +5,7 @@
  * live feed for active events, and segment playback.
  */
 
-const CARD_VERSION = "0.2.15";
+const CARD_VERSION = "0.2.16";
 
 class ReolinkHaSekurityCard extends HTMLElement {
   constructor() {
@@ -715,12 +715,12 @@ class ReolinkHaSekurityCard extends HTMLElement {
     const container = this.shadowRoot.getElementById(`detail-${eventId}`);
     if (!container) return;
 
-    const { metadata, segments, snapshot_url, is_active, camera_entity } = detail;
+    const { metadata, stream_url, segments, snapshot_url, is_active, camera_entity } = detail;
 
     let html = "";
 
     const hasLive = is_active && camera_entity;
-    const hasSegments = segments && segments.length > 0;
+    const hasSegments = (segments && segments.length > 0) || !!stream_url;
 
     // Build media panels
     if (hasLive || hasSegments) {
@@ -738,22 +738,28 @@ class ReolinkHaSekurityCard extends HTMLElement {
 
       // Recorded segments panel — seamless player
       if (hasSegments) {
-        const totalDuration = segments.reduce((sum, s) => sum + (s.duration || 30), 0);
+        const totalDuration = (segments && segments.length > 0)
+          ? segments.reduce((sum, s) => sum + (s.duration || 30), 0)
+          : 30;
+        const videoSrc = stream_url || (segments && segments[0] ? segments[0].url : "");
+
         // Build timeline ticks for segment boundaries
         let ticksHtml = '';
-        let accum = 0;
-        for (let i = 1; i < segments.length; i++) {
-          accum += segments[i - 1].duration || 30;
-          const pct = (accum / totalDuration) * 100;
-          ticksHtml += `<div class="timeline-tick" style="left:${pct}%"></div>`;
+        if (segments && segments.length > 1 && !stream_url) {
+          let accum = 0;
+          for (let i = 1; i < segments.length; i++) {
+            accum += segments[i - 1].duration || 30;
+            const pct = (accum / totalDuration) * 100;
+            ticksHtml += `<div class="timeline-tick" style="left:${pct}%"></div>`;
+          }
         }
 
         html += `
           <div class="media-panel">
             <div class="media-panel-label">▶ Recording${is_active ? ' <span class="recording-pulse"></span>' : ''}</div>
             <div class="video-player-container" id="vpc-${eventId}">
-              <video class="active-player" id="player-${eventId}" controls autoplay playsinline src="${segments[0].url}"></video>
-              <video class="hidden-preload" id="preload-${eventId}" preload="auto" playsinline></video>
+              <video class="active-player" id="player-${eventId}" controls autoplay playsinline src="${videoSrc}"></video>
+              ${stream_url ? "" : `<video class="hidden-preload" id="preload-${eventId}" preload="auto" playsinline></video>`}
             </div>
             <div class="timeline-bar" id="timeline-${eventId}">
               ${ticksHtml}
@@ -762,7 +768,7 @@ class ReolinkHaSekurityCard extends HTMLElement {
             </div>
             <div class="timeline-info">
               <span id="time-current-${eventId}">0:00</span>
-              <span class="segment-indicator" id="seg-info-${eventId}">Segment 1/${segments.length}</span>
+              <span class="segment-indicator" id="seg-info-${eventId}">${stream_url ? "Continuous Stream" : `Segment 1/${segments ? segments.length : 1}`}</span>
               <span id="time-total-${eventId}">${Math.floor(totalDuration / 60)}:${String(Math.floor(totalDuration % 60)).padStart(2, '0')}</span>
             </div>
           </div>
@@ -817,19 +823,23 @@ class ReolinkHaSekurityCard extends HTMLElement {
       });
     }
 
-    if (player && segments && segments.length > 0) {
+    if (player && (stream_url || (segments && segments.length > 0))) {
       let currentSeg = 0;
-      const totalDuration = segments.reduce((sum, s) => sum + (s.duration || 30), 0);
+      const totalDuration = (segments && segments.length > 0)
+        ? segments.reduce((sum, s) => sum + (s.duration || 30), 0)
+        : 30;
 
       // Calculate cumulative start times for each segment
       const segStartTimes = [0];
-      for (let i = 1; i < segments.length; i++) {
-        segStartTimes.push(segStartTimes[i - 1] + (segments[i - 1].duration || 30));
+      if (segments && segments.length > 0) {
+        for (let i = 1; i < segments.length; i++) {
+          segStartTimes.push(segStartTimes[i - 1] + (segments[i - 1].duration || 30));
+        }
       }
 
       // Preload next segment
       const preloadNext = () => {
-        if (preloadEl && currentSeg + 1 < segments.length) {
+        if (!stream_url && preloadEl && segments && currentSeg + 1 < segments.length) {
           preloadEl.src = segments[currentSeg + 1].url;
           preloadEl.load();
         }
@@ -845,13 +855,19 @@ class ReolinkHaSekurityCard extends HTMLElement {
       // Update timeline progress
       const updateProgress = () => {
         if (!player || player.paused && player.ended) return;
-        const segOffset = segStartTimes[currentSeg] || 0;
-        const globalTime = segOffset + (player.currentTime || 0);
-        const pct = Math.min((globalTime / totalDuration) * 100, 100);
+        const globalTime = stream_url
+          ? (player.currentTime || 0)
+          : (segStartTimes[currentSeg] || 0) + (player.currentTime || 0);
+        const maxTime = stream_url ? (player.duration || totalDuration) : totalDuration;
+        const pct = Math.min((globalTime / maxTime) * 100, 100);
         if (progressBar) progressBar.style.width = `${pct}%`;
         if (handlePin) handlePin.style.left = `${pct}%`;
         if (timeCurrentEl) timeCurrentEl.textContent = fmtTime(globalTime);
-        if (segInfoEl) segInfoEl.textContent = `Segment ${currentSeg + 1}/${segments.length}`;
+        if (segInfoEl) {
+          segInfoEl.textContent = stream_url
+            ? "Continuous Stream"
+            : `Segment ${currentSeg + 1}/${segments ? segments.length : 1}`;
+        }
       };
 
       player.addEventListener('timeupdate', updateProgress);
@@ -863,10 +879,11 @@ class ReolinkHaSekurityCard extends HTMLElement {
       // Preload first next segment
       preloadNext();
 
-      // Gapless segment transition
+      // Segment transition or completion
       player.addEventListener('ended', () => {
+        if (stream_url) return;
         currentSeg++;
-        if (currentSeg < segments.length) {
+        if (segments && currentSeg < segments.length) {
           // Swap: use the preloaded source
           player.src = segments[currentSeg].url;
           player.play().catch(() => {});
@@ -886,25 +903,34 @@ class ReolinkHaSekurityCard extends HTMLElement {
           const rect = timelineBar.getBoundingClientRect();
           if (!rect.width) return;
           const clickPct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-          const targetTime = clickPct * totalDuration;
+          const maxDuration = stream_url ? (player.duration || totalDuration) : totalDuration;
+          const targetTime = clickPct * maxDuration;
 
           // Update UI immediately during drag
           if (progressBar) progressBar.style.width = `${clickPct * 100}%`;
           if (handlePin) handlePin.style.left = `${clickPct * 100}%`;
           if (timeCurrentEl) timeCurrentEl.textContent = fmtTime(targetTime);
 
+          if (stream_url) {
+            player.currentTime = targetTime;
+            if (player.paused && !isDragging) player.play().catch(() => {});
+            return;
+          }
+
           // Find which segment targetTime falls into
           let targetSeg = 0;
-          for (let i = segments.length - 1; i >= 0; i--) {
-            if (targetTime >= segStartTimes[i]) {
-              targetSeg = i;
-              break;
+          if (segments && segments.length > 0) {
+            for (let i = segments.length - 1; i >= 0; i--) {
+              if (targetTime >= segStartTimes[i]) {
+                targetSeg = i;
+                break;
+              }
             }
           }
 
-          const segLocalTime = targetTime - segStartTimes[targetSeg];
+          const segLocalTime = targetTime - (segStartTimes[targetSeg] || 0);
 
-          if (targetSeg !== currentSeg) {
+          if (targetSeg !== currentSeg && segments && segments[targetSeg]) {
             currentSeg = targetSeg;
             player.src = segments[currentSeg].url;
             player.addEventListener('loadeddata', function seekOnLoad() {
@@ -1001,16 +1027,29 @@ class ReolinkHaSekurityCard extends HTMLElement {
 
         if (seekOffset <= 0) return;
 
+        if (stream_url) {
+          player.addEventListener('loadeddata', function seekOnLoad() {
+            if (player.currentTime < 1) {
+              const skipTo = Math.min(seekOffset, (player.duration || totalDuration) - 1);
+              if (skipTo > 0) player.currentTime = skipTo;
+            }
+            player.removeEventListener('loadeddata', seekOnLoad);
+          });
+          return;
+        }
+
         // Find which segment this offset falls into
         let targetSeg = 0;
-        for (let i = segments.length - 1; i >= 0; i--) {
-          if (seekOffset >= segStartTimes[i]) {
-            targetSeg = i;
-            break;
+        if (segments && segments.length > 0) {
+          for (let i = segments.length - 1; i >= 0; i--) {
+            if (seekOffset >= segStartTimes[i]) {
+              targetSeg = i;
+              break;
+            }
           }
         }
 
-        const segLocalTime = seekOffset - segStartTimes[targetSeg];
+        const segLocalTime = seekOffset - (segStartTimes[targetSeg] || 0);
 
         if (targetSeg === 0) {
           // Same first segment — just seek within it

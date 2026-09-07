@@ -65,6 +65,7 @@ from .metadata import (
     save_event_metadata,
     get_event_dir,
     get_media_base_path,
+    merge_event_segments,
     verify_media_path,
 )
 from .notifications import send_error_notification, send_event_notification
@@ -878,9 +879,25 @@ class EventDetailAPIView(HomeAssistantView):
         is_active = camera_name in self._coordinator.active_events
         camera_entity = metadata.get("camera_entity", "")
 
+        # Check if single stream event.mp4 exists or can be merged
+        stream_url = None
+        if not is_active and metadata.get("segments"):
+            event_dir = get_event_dir(self._coordinator.media_path, camera_name, event_id)
+            event_mp4_file = await self._coordinator.hass.async_add_executor_job(
+                merge_event_segments, event_dir, metadata
+            )
+            if event_mp4_file:
+                raw_stream = f"{base_media_url}/{event_mp4_file}"
+                stream_url = async_sign_path(
+                    self._coordinator.hass,
+                    raw_stream,
+                    timedelta(hours=1),
+                )
+
         return web.json_response(
             {
                 "metadata": metadata,
+                "stream_url": stream_url,
                 "segments": segments_with_urls,
                 "snapshot_url": snapshot_url,
                 "is_active": is_active,
