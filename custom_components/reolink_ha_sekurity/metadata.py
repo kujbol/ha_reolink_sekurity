@@ -2,148 +2,52 @@
 
 from __future__ import annotations
 
-import json
 import logging
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from .const import EVENTS_INDEX_FILE, EVENT_METADATA_FILE, MAX_EVENTS_INDEX
+from .storage import (
+    MediaPathUnavailable,
+    _ensure_dir,
+    _read_json,
+    _write_json,
+    ensure_camera_dirs,
+    ensure_event_dir,
+    get_camera_dir,
+    get_event_dir,
+    get_media_base_path,
+    is_nas_mounted,
+    verify_media_path,
+)
+from .concat import merge_event_segments
 
 _LOGGER = logging.getLogger(__name__)
 
-
-class MediaPathUnavailable(Exception):
-    """Raised when the media base path (NAS mount) is not available."""
-
-
-def _ensure_dir(path: Path) -> None:
-    """Create directory if it doesn't exist."""
-    try:
-        path.mkdir(parents=True, exist_ok=True)
-    except (OSError, PermissionError) as exc:
-        raise MediaPathUnavailable(
-            f"Failed to create directory '{path}': {exc}"
-        ) from exc
-
-
-def _write_json(path: Path, data: dict | list) -> None:
-    """Write JSON data to a file atomically."""
-    tmp_path = path.with_suffix(".tmp")
-    try:
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, default=str)
-        tmp_path.rename(path)
-    except (OSError, PermissionError) as exc:
-        _LOGGER.exception("Failed to write JSON to %s", path)
-        if tmp_path.exists():
-            try:
-                tmp_path.unlink()
-            except OSError:
-                pass
-        raise MediaPathUnavailable(
-            f"Failed to write JSON to '{path}': {exc}"
-        ) from exc
-
-
-def _read_json(path: Path) -> dict | list | None:
-    """Read JSON data from a file. Returns None if file doesn't exist."""
-    if not path.exists():
-        return None
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, OSError):
-        _LOGGER.exception("Failed to read JSON from %s", path)
-        return None
-
-
-def get_media_base_path(media_path: str) -> Path:
-    """Get the absolute base path for media storage."""
-    return Path("/media") / media_path
-
-
-def is_nas_mounted(mount_point: Path) -> bool:
-    """Check if mount_point is an active mount point in Linux/HA."""
-    if not mount_point.exists() or not mount_point.is_dir():
-        return False
-
-    # If mount_point is /media itself, treat as valid local storage
-    if mount_point.resolve() == Path("/media").resolve():
-        return True
-
-    # 1. Standard Python mount check (checks st_dev difference)
-    if os.path.ismount(mount_point):
-        return True
-
-    # 2. Linux /proc/mounts check
-    try:
-        proc_mounts = Path("/proc/mounts")
-        if proc_mounts.exists():
-            target_str = str(mount_point.resolve())
-            with open(proc_mounts, "r", encoding="utf-8") as f:
-                for line in f:
-                    parts = line.split()
-                    if len(parts) >= 2 and parts[1] == target_str:
-                        return True
-    except Exception:
-        pass
-
-    return False
-
-
-def verify_media_path(media_path: str) -> None:
-    """Verify the media base path (NAS mount) exists, is mounted, and is writable.
-
-    The first component of media_path is the mount name (e.g. 'camera_on_nas').
-    We check that /media/<mount_name> is actively mounted by Home Assistant —
-    if it is not mounted, we raise MediaPathUnavailable without creating local directories.
-
-    Raises MediaPathUnavailable if the mount is not present or not writable.
-    """
-    mount_name = media_path.split("/")[0]
-    mount_point = Path("/media") / mount_name
-
-    if not is_nas_mounted(mount_point):
-        raise MediaPathUnavailable(
-            f"Media mount '/media/{mount_name}' is not mounted yet by Home Assistant. "
-            f"Is the NAS mounted? Check Settings → System → Storage."
-        )
-
-    base_path = get_media_base_path(media_path)
-    _ensure_dir(base_path)
-
-
-def get_camera_dir(media_path: str, camera_name: str) -> Path:
-    """Get the directory for a camera's data."""
-    return get_media_base_path(media_path) / camera_name
-
-
-def get_event_dir(media_path: str, camera_name: str, event_id: str) -> Path:
-    """Get the directory for a specific event."""
-    return get_camera_dir(media_path, camera_name) / event_id
-
-
-def ensure_camera_dirs(media_path: str, camera_name: str) -> None:
-    """Create the camera directory structure on the NAS.
-
-    Raises MediaPathUnavailable if the NAS mount is not present.
-    """
-    verify_media_path(media_path)
-    camera_dir = get_camera_dir(media_path, camera_name)
-    _ensure_dir(camera_dir)
-
-
-def ensure_event_dir(media_path: str, camera_name: str, event_id: str) -> Path:
-    """Create and return the event directory.
-
-    Raises MediaPathUnavailable if the NAS mount is not present.
-    """
-    verify_media_path(media_path)
-    event_dir = get_event_dir(media_path, camera_name, event_id)
-    _ensure_dir(event_dir)
-    return event_dir
+# Re-export storage & concat functions for backward compatibility
+__all__ = [
+    "MediaPathUnavailable",
+    "get_media_base_path",
+    "is_nas_mounted",
+    "verify_media_path",
+    "get_camera_dir",
+    "get_event_dir",
+    "ensure_camera_dirs",
+    "ensure_event_dir",
+    "merge_event_segments",
+    "generate_event_id",
+    "create_event_metadata",
+    "save_event_metadata",
+    "load_event_metadata",
+    "add_segment_to_metadata",
+    "complete_event_metadata",
+    "fail_event_metadata",
+    "load_events_index",
+    "save_events_index",
+    "append_to_events_index",
+    "load_all_events",
+]
 
 
 def generate_event_id(camera_name: str) -> str:
@@ -224,81 +128,6 @@ def fail_event_metadata(metadata: dict, error_msg: str) -> None:
     metadata["ended_at"] = now.isoformat()
     metadata["status"] = "error"
     metadata["error"] = error_msg
-
-
-def merge_event_segments(event_dir: Path, metadata: dict) -> str | None:
-    """Concatenate segment files into a single event.mp4 file using ffmpeg -c copy."""
-    raw_segments = metadata.get("segments", [])
-    if not raw_segments:
-        return None
-
-    # Only include valid non-empty files (>1KB)
-    segments = []
-    for s in raw_segments:
-        seg_path = event_dir / s["file"]
-        if seg_path.exists() and seg_path.stat().st_size > 1024:
-            segments.append(s)
-
-    if not segments:
-        return None
-
-    event_mp4 = event_dir / "event.mp4"
-    if event_mp4.exists() and event_mp4.stat().st_size > 1024:
-        return "event.mp4"
-
-    if len(segments) == 1:
-        seg_file = event_dir / segments[0]["file"]
-        try:
-            import shutil
-            shutil.copyfile(seg_file, event_mp4)
-            return "event.mp4"
-        except Exception:
-            pass
-
-    filelist_path = event_dir / "concat_list.txt"
-    try:
-        lines = [f"file '{s['file']}'" for s in segments]
-        filelist_path.write_text("\n".join(lines), encoding="utf-8")
-
-        import subprocess
-        cmd = [
-            "ffmpeg",
-            "-y",
-            "-f", "concat",
-            "-safe", "0",
-            "-i", str(filelist_path),
-            "-c", "copy",
-            "-movflags", "+faststart",
-            str(event_mp4),
-        ]
-        res = subprocess.run(
-            cmd,
-            cwd=str(event_dir),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            timeout=30,
-        )
-        if filelist_path.exists():
-            try:
-                filelist_path.unlink()
-            except OSError:
-                pass
-
-        if res.returncode == 0 and event_mp4.exists() and event_mp4.stat().st_size > 1024:
-            _LOGGER.info(
-                "Merged %d segments into single event.mp4 for %s",
-                len(segments), event_dir.name,
-            )
-            return "event.mp4"
-    except Exception as exc:
-        _LOGGER.warning("Failed to merge segments to event.mp4 for %s: %s", event_dir.name, exc)
-        if filelist_path.exists():
-            try:
-                filelist_path.unlink()
-            except OSError:
-                pass
-
-    return None
 
 
 # --- Events index (per-camera rolling list) ---
