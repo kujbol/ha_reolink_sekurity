@@ -33,6 +33,7 @@ from .const import (
     CONF_NIGHT_END,
     CONF_NIGHT_START,
     CONF_NOTIFY_TARGETS,
+    CONF_ERROR_NOTIFY_TARGETS,
     CONF_POST_ROLL,
     CONF_SENSOR_DEBOUNCE,
     CONF_TRIGGER_SENSORS,
@@ -220,6 +221,11 @@ class ReolinkHaSekurityCoordinator:
     @property
     def notify_targets(self) -> list[str]:
         return self.config.get(CONF_NOTIFY_TARGETS, [])
+
+    @property
+    def error_notify_targets(self) -> list[str]:
+        targets = self.config.get(CONF_ERROR_NOTIFY_TARGETS, [])
+        return targets if targets else self.notify_targets
 
     @property
     def night_start(self) -> str:
@@ -506,11 +512,11 @@ class ReolinkHaSekurityCoordinator:
                 camera_name,
                 exc,
             )
-            if not self._nas_error_notified and self.notify_targets:
+            if not self._nas_error_notified and self.error_notify_targets:
                 self._nas_error_notified = True
                 await send_error_notification(
                     self.hass,
-                    self.notify_targets,
+                    self.error_notify_targets,
                     camera_name,
                     f"NAS media storage is unavailable. Recordings are NOT being saved. "
                     f"Check Settings → System → Storage.",
@@ -623,11 +629,11 @@ class ReolinkHaSekurityCoordinator:
                 "[SEKURITY] Recording failed for %s — NAS unavailable: %s",
                 camera_name, exc,
             )
-            if not self._nas_error_notified and self.notify_targets:
+            if not self._nas_error_notified and self.error_notify_targets:
                 self._nas_error_notified = True
                 await send_error_notification(
                     self.hass,
-                    self.notify_targets,
+                    self.error_notify_targets,
                     camera_name,
                     f"NAS media storage became unavailable during recording. "
                     f"Check Settings → System → Storage.",
@@ -637,11 +643,11 @@ class ReolinkHaSekurityCoordinator:
                 "[SEKURITY] Recording FAILED for %s (event=%s)",
                 camera_name, recorder.event_id,
             )
-            if not self._nas_error_notified and self.notify_targets:
+            if not self._nas_error_notified and self.error_notify_targets:
                 self._nas_error_notified = True
                 await send_error_notification(
                     self.hass,
-                    self.notify_targets,
+                    self.error_notify_targets,
                     camera_name,
                     f"Recording failed for camera {camera_name}",
                 )
@@ -685,10 +691,10 @@ class ReolinkHaSekurityCoordinator:
             self.active_events.pop(camera_name, None)
 
             # Notify if configured
-            if self.notify_targets:
+            if self.error_notify_targets:
                 await send_error_notification(
                     self.hass,
-                    self.notify_targets,
+                    self.error_notify_targets,
                     camera_name,
                     f"Stuck recording detected and cleaned up for {camera_name}. "
                     f"Event {recorder.event_id} was running for "
@@ -945,6 +951,7 @@ class ConfigAPIView(HomeAssistantView):
         return web.json_response({
             "dashboard_path": self._coordinator.dashboard_path,
             "notify_targets": self._coordinator.notify_targets,
+            "error_notify_targets": self._coordinator.error_notify_targets,
             "media_path": self._coordinator.media_path,
             "cameras": list(self._coordinator.cameras.keys()),
             "config_raw": dict(self._coordinator.config),

@@ -7,6 +7,7 @@
         "data": {
           "media_path": "Media storage path (relative to /media/)",
           "notify_targets": "Notification targets (comma-separated)",
+          "error_notify_targets": "Error notification targets (optional, comma-separated)",
           "night_start": "Night alarm start time",
           "night_end": "Night alarm end time",
           "light_entities": "Outside light entities",
@@ -15,6 +16,7 @@
         },
         "data_description": {
           "notify_targets": "e.g. notify.mobile_app_phone1,notify.mobile_app_phone2",
+          "error_notify_targets": "e.g. notify.mobile_app_phone1 (leave empty to send error notifications to main notify targets)",
           "media_path": "Clips and metadata will be saved here"
         }
       },
@@ -66,6 +68,7 @@
         "data": {
           "media_path": "Media storage path (relative to /media/)",
           "notify_targets": "Notification targets (comma-separated)",
+          "error_notify_targets": "Error notification targets (optional, comma-separated)",
           "night_start": "Night alarm start time",
           "night_end": "Night alarm end time",
           "light_entities": "Outside light entities",

@@ -36,6 +36,7 @@ from .const import (
     CONF_NIGHT_END,
     CONF_NIGHT_START,
     CONF_NOTIFY_TARGETS,
+    CONF_ERROR_NOTIFY_TARGETS,
     CONF_POST_ROLL,
     CONF_TRIGGER_SENSORS,
     CONF_RECORD_SENSORS,
@@ -160,6 +161,11 @@ class ReolinkHaSekurityConfigFlow(
                     for t in user_input.get(CONF_NOTIFY_TARGETS, "").split(",")
                     if t.strip()
                 ],
+                CONF_ERROR_NOTIFY_TARGETS: [
+                    t.strip()
+                    for t in user_input.get(CONF_ERROR_NOTIFY_TARGETS, "").split(",")
+                    if t.strip()
+                ],
                 CONF_NIGHT_START: user_input.get(CONF_NIGHT_START, DEFAULT_NIGHT_START),
                 CONF_NIGHT_END: user_input.get(CONF_NIGHT_END, DEFAULT_NIGHT_END),
                 CONF_LIGHT_ENTITIES: user_input.get(CONF_LIGHT_ENTITIES, []),
@@ -182,6 +188,15 @@ class ReolinkHaSekurityConfigFlow(
                     vol.Required(
                         CONF_NOTIFY_TARGETS,
                         default="notify.mobile_app_",
+                    ): TextSelector(
+                        TextSelectorConfig(
+                            type="text",
+                            multiline=False,
+                        )
+                    ),
+                    vol.Optional(
+                        CONF_ERROR_NOTIFY_TARGETS,
+                        default="",
                     ): TextSelector(
                         TextSelectorConfig(
                             type="text",
@@ -406,6 +421,11 @@ class ReolinkHaSekurityOptionsFlow(config_entries.OptionsFlow):
                 for t in user_input.get(CONF_NOTIFY_TARGETS, "").split(",")
                 if t.strip()
             ]
+            new_data[CONF_ERROR_NOTIFY_TARGETS] = [
+                t.strip()
+                for t in user_input.get(CONF_ERROR_NOTIFY_TARGETS, "").split(",")
+                if t.strip()
+            ]
             new_data[CONF_NIGHT_START] = user_input.get(
                 CONF_NIGHT_START, current.get(CONF_NIGHT_START, DEFAULT_NIGHT_START)
             )
@@ -430,6 +450,9 @@ class ReolinkHaSekurityOptionsFlow(config_entries.OptionsFlow):
         notify_str = ",".join(
             current.get(CONF_NOTIFY_TARGETS, [])
         )
+        error_notify_str = ",".join(
+            current.get(CONF_ERROR_NOTIFY_TARGETS, [])
+        )
 
         return self.async_show_form(
             step_id="global_settings",
@@ -442,6 +465,10 @@ class ReolinkHaSekurityOptionsFlow(config_entries.OptionsFlow):
                     vol.Required(
                         CONF_NOTIFY_TARGETS,
                         default=notify_str,
+                    ): TextSelector(TextSelectorConfig(type="text")),
+                    vol.Optional(
+                        CONF_ERROR_NOTIFY_TARGETS,
+                        default=error_notify_str,
                     ): TextSelector(TextSelectorConfig(type="text")),
                     vol.Required(
                         CONF_NIGHT_START,

@@ -38,6 +38,7 @@ EVENT_TYPE_PRIORITY = {
 # --- Config keys ---
 CONF_MEDIA_PATH = "media_path"
 CONF_NOTIFY_TARGETS = "notify_targets"
+CONF_ERROR_NOTIFY_TARGETS = "error_notify_targets"
 CONF_NIGHT_START = "night_start"
 CONF_NIGHT_END = "night_end"
 CONF_LIGHT_ENTITIES = "light_entities"
